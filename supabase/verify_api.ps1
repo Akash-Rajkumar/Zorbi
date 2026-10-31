@@ -609,24 +609,162 @@ Run-Test "R8" "WebSocket subscribe to public:gesture_events INSERT and verify de
     $ws = [System.Net.WebSockets.ClientWebSocket]::new()
     $connectCts = [System.Threading.CancellationTokenSource]::new(5000) # 5s connect timeout
 
+    # Diagnostic message counters using a single shared object across all scopes
+    $wsStats = [PSCustomObject]@{
+        Total           = 0
+        PhxReply        = 0
+        System          = 0
+        PostgresChanges = 0
+        Unrecognized    = 0
+    }
+    $statsEmitted = $false
+
+    $wsReader = @{
+        Socket      = $ws
+        PendingTask = $null
+        Buffer      = [byte[]]::new(8192)
+        Memory      = [System.IO.MemoryStream]::new()
+    }
+
     try {
-        # Helper: Read a single full WebSocket message (with fragmented-message assembly)
-        # Parses JSON immediately; if token times out, throws OperationCanceledException
-        function Read-FullWsMessage([System.Net.WebSockets.ClientWebSocket]$socket, [System.Threading.CancellationToken]$token) {
-            $buf = [byte[]]::new(8192)
-            $mem = [System.IO.MemoryStream]::new()
-            do {
-                $seg = [System.ArraySegment[byte]]::new($buf)
-                $recvTask = $socket.ReceiveAsync($seg, $token)
-                $recvTask.Wait() # Throws if token cancels
-                $result = $recvTask.Result
-                if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                    return $null
+        # Helper: Extract underlying exception message recursively without secrets
+        function Get-DetailedException([System.Exception]$ex, [System.Net.WebSockets.ClientWebSocket]$socket, [string]$stage) {
+            $wsState = if ($socket) { $socket.State.ToString() } else { "Unknown" }
+            $chain = @()
+            $curr = $ex
+            while ($curr) {
+                $chain += "$($curr.GetType().FullName): $($curr.Message)"
+                if ($curr -is [System.AggregateException] -and $curr.InnerExceptions) {
+                    foreach ($sub in $curr.InnerExceptions) {
+                        if ($sub -ne $curr.InnerException) {
+                            $chain += "  [Inner] $($sub.GetType().FullName): $($sub.Message)"
+                        }
+                    }
                 }
-                $mem.Write($buf, 0, $result.Count)
-            } while (-not $result.EndOfMessage)
-            $raw = [System.Text.Encoding]::UTF8.GetString($mem.ToArray())
-            return ($raw | ConvertFrom-Json)
+                $curr = $curr.InnerException
+            }
+            return "Stage: $stage | WebSocket State: $wsState | Details: $($chain -join ' ---> ')"
+        }
+
+        # Helper: Log raw sanitized WebSocket diagnostics and update counters
+        function Log-WsMessageDiagnostic([object]$msgObj, $stats) {
+            if ($null -eq $msgObj) { return }
+            $stats.Total++
+
+            $evt = $msgObj.event
+            $topic = $msgObj.topic
+            $ref = $msgObj.ref
+            $joinRef = $msgObj.join_ref
+            $p = $msgObj.payload
+            $pProps = if ($p -and $p.PSObject) { ($p.PSObject.Properties.Name -join ", ") } else { "<none>" }
+
+            Write-Host "    [WS RECV] event='$evt' topic='$topic' ref='$ref' join_ref='$joinRef' payload_keys=[$pProps]"
+
+            if ($evt -eq "phx_reply") {
+                $stats.PhxReply++
+                $status = if ($p -and $p.status) { $p.status } else { "<none>" }
+                $subIds = "<none>"
+                if ($p -and $p.response -and $p.response.postgres_changes) {
+                    $subIds = ($p.response.postgres_changes | ForEach-Object { "$($_.id) [$($_.event) $($_.schema).$($_.table)]" }) -join "; "
+                }
+                Write-Host "      -> phx_reply: status='$status' postgres_changes_subs=[$subIds]"
+            } elseif ($evt -eq "system") {
+                $stats.System++
+                $sysStatus = if ($p -and $p.status) { $p.status } else { "<none>" }
+                $sysMsg = if ($p -and $p.message) { $p.message } else { "<none>" }
+                $sysExt = if ($p -and $p.extension) { $p.extension } else { "<none>" }
+                $sysChan = if ($p -and $p.channel) { $p.channel } else { "<unavailable>" }
+                Write-Host "      -> system: status='$sysStatus' extension='$sysExt' channel='$sysChan' message='$sysMsg'"
+            } elseif ($evt -eq "postgres_changes") {
+                $stats.PostgresChanges++
+                $d = if ($p) { $p.data } else { $null }
+                $schema = if ($d -and $d.schema) { $d.schema } elseif ($p -and $p.schema) { $p.schema } else { "<none>" }
+                $table  = if ($d -and $d.table) { $d.table } elseif ($p -and $p.table) { $p.table } else { "<none>" }
+                $type   = if ($d -and $d.type) { $d.type } elseif ($p -and $p.eventType) { $p.eventType } elseif ($p -and $p.type) { $p.type } else { "<none>" }
+                $rec    = if ($d -and $null -ne $d.record) { $d.record } elseif ($p -and $null -ne $p.record) { $p.record } elseif ($p -and $null -ne $p.new) { $p.new } else { $null }
+                $hasSession = if ($rec -and $rec.session_id) { "session_id=$($rec.session_id)" } else { "session_id=<missing>" }
+                $hasMag = if ($rec -and $null -ne $rec.magnitude) { "magnitude=$($rec.magnitude)" } else { "magnitude=<missing>" }
+                Write-Host "      -> postgres_changes: schema='$schema' table='$table' type='$type' record=[$hasSession, $hasMag]"
+            } elseif ($evt -eq "phx_error" -or $evt -eq "phx_close") {
+                $reason = if ($p -and $p.reason) { $p.reason } else { "<none>" }
+                Write-Host "      -> $($evt): reason='$reason'"
+            } else {
+                $stats.Unrecognized++
+                Write-Host "      -> unrecognized event: '$evt'"
+            }
+        }
+
+        # Helper: Bounded receive without cancelling in-flight ReceiveAsync operation
+        function Read-WsMessageWithTimeout {
+            param(
+                [Parameter(Mandatory=$true)]$Reader,
+                [Parameter(Mandatory=$true)][int]$TimeoutMs
+            )
+
+            $socket = $Reader.Socket
+            $deadline = [System.DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+
+            while ($true) {
+                $remainingMs = [int]($deadline - [System.DateTime]::UtcNow).TotalMilliseconds
+                if ($remainingMs -le 0) {
+                    return @{ Status = "Timeout"; Message = $null; State = $socket.State }
+                }
+
+                if ($null -eq $Reader.PendingTask) {
+                    if ($socket.State -ne [System.Net.WebSockets.WebSocketState]::Open -and
+                        $socket.State -ne [System.Net.WebSockets.WebSocketState]::CloseReceived) {
+                        return @{ Status = "SocketClosed"; Message = $null; State = $socket.State }
+                    }
+
+                    $seg = [System.ArraySegment[byte]]::new($Reader.Buffer)
+                    $Reader.PendingTask = $socket.ReceiveAsync($seg, [System.Threading.CancellationToken]::None)
+                }
+
+                $waitSlice = [Math]::Max(1, [Math]::Min($remainingMs, 250))
+                $completed = $false
+                try {
+                    $completed = $Reader.PendingTask.Wait($waitSlice)
+                } catch {
+                    $taskEx = $Reader.PendingTask.Exception
+                    $Reader.PendingTask = $null
+                    $unwrapped = if ($taskEx -and $taskEx.InnerException) { $taskEx.InnerException } else { $_.Exception }
+                    return @{ Status = "Error"; Exception = $unwrapped; State = $socket.State }
+                }
+
+                if (-not $completed) {
+                    if ([System.DateTime]::UtcNow -ge $deadline) {
+                        return @{ Status = "Timeout"; Message = $null; State = $socket.State }
+                    }
+                    continue
+                }
+
+                $recvResult = $Reader.PendingTask.Result
+                $Reader.PendingTask = $null
+
+                if ($recvResult.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                    return @{
+                        Status           = "Close"
+                        Message          = $null
+                        CloseStatus      = $socket.CloseStatus
+                        CloseDescription = $socket.CloseStatusDescription
+                        State            = $socket.State
+                    }
+                }
+
+                $Reader.Memory.Write($Reader.Buffer, 0, $recvResult.Count)
+
+                if ($recvResult.EndOfMessage) {
+                    $bytes = $Reader.Memory.ToArray()
+                    $Reader.Memory.SetLength(0)
+                    $rawJson = [System.Text.Encoding]::UTF8.GetString($bytes)
+                    try {
+                        $jsonObj = $rawJson | ConvertFrom-Json
+                        return @{ Status = "Ok"; Message = $jsonObj; Raw = $rawJson }
+                    } catch {
+                        return @{ Status = "ParseError"; Error = $_; Raw = $rawJson; State = $socket.State }
+                    }
+                }
+            }
         }
 
         # 1. Connect
@@ -662,38 +800,87 @@ Run-Test "R8" "WebSocket subscribe to public:gesture_events INSERT and verify de
             return @{ Pass = $false; Status = 0; Message = "Failed to send phx_join message to WebSocket within 3s timeout" }
         }
 
-        # Read until join reply is received
-        $joined = $false
-        $joinCts = [System.Threading.CancellationTokenSource]::new(6000)
-        try {
-            while (-not $joined) {
-                $msgObj = Read-FullWsMessage $ws $joinCts.Token
-                if ($null -eq $msgObj) {
-                    return @{ Pass = $false; Status = 0; Message = "WebSocket closed while waiting for phx_join acknowledgment" }
-                }
+        # Phase 2A: Read until join reply is received (Budget: 6000 ms)
+        $channelJoined = $false
+        $subscriptionIds = @()
+        $subscriptionReady = $false
+        $readinessState = "pending"
+        $subDetails = "<none>"
+
+        $joinDeadline = [System.DateTime]::UtcNow.AddMilliseconds(6000)
+        while (-not $channelJoined -and [System.DateTime]::UtcNow -lt $joinDeadline) {
+            $rem = [int]($joinDeadline - [System.DateTime]::UtcNow).TotalMilliseconds
+            if ($rem -le 0) { break }
+            $res = Read-WsMessageWithTimeout $wsReader $rem
+
+            if ($res.Status -eq "Timeout") {
+                break
+            } elseif ($res.Status -eq "Close") {
+                $closeDesc = if ($res.CloseDescription) { " ($($res.CloseStatus): $($res.CloseDescription))" } else { "" }
+                return @{ Pass = $false; Status = 0; Message = "WebSocket closed by server while waiting for phx_join acknowledgment$closeDesc" }
+            } elseif ($res.Status -eq "Error") {
+                return @{ Pass = $false; Status = 0; Message = "WebSocket transport error during join acknowledgment: $(Get-DetailedException $res.Exception $ws 'join_ack')" }
+            } elseif ($res.Status -eq "Ok") {
+                $msgObj = $res.Message
+                Log-WsMessageDiagnostic $msgObj $wsStats
+
                 if ($msgObj.event -eq "phx_reply" -and $msgObj.topic -eq $joinTopic -and $msgObj.ref -eq $joinRef) {
                     if ($msgObj.payload -and $msgObj.payload.status -eq "ok") {
-                        $joined = $true
+                        $channelJoined = $true
+                        if ($msgObj.payload.response -and $msgObj.payload.response.postgres_changes) {
+                            $subscriptionIds = @($msgObj.payload.response.postgres_changes | ForEach-Object { $_.id })
+                            $subDetails = ($msgObj.payload.response.postgres_changes | ForEach-Object { "$($_.id) [$($_.event) $($_.schema).$($_.table)]" }) -join "; "
+                        }
+                        $readinessState = "join_acknowledged"
                         break
                     } else {
                         return @{ Pass = $false; Status = 0; Message = "phx_join rejected with status: $($msgObj.payload.status)" }
                     }
                 }
             }
-        } catch [System.AggregateException] {
-            if ($_.InnerException -is [System.OperationCanceledException]) {
-                return @{ Pass = $false; Status = 0; Message = "Timed out waiting for Realtime channel phx_join acknowledgment (6s)" }
-            }
-            return @{ Pass = $false; Status = 0; Message = "WebSocket error during join: $_" }
-        } catch [System.OperationCanceledException] {
-            return @{ Pass = $false; Status = 0; Message = "Timed out waiting for Realtime channel phx_join acknowledgment (6s)" }
-        } finally {
-            $joinCts.Dispose()
         }
 
-        if (-not $joined) {
-            return @{ Pass = $false; Status = 0; Message = "Failed to establish Realtime channel subscription" }
+        if (-not $channelJoined) {
+            return @{ Pass = $false; Status = 0; Message = "Timed out waiting for Realtime channel phx_join acknowledgment (6s) | State: $($ws.State)" }
         }
+
+        # Phase 2B: Optional system confirmation window (Budget: 1500 ms)
+        # Note: Bounded wait preserves any in-flight receive task without cancelling or aborting socket
+        if ($channelJoined) {
+            $sysDeadline = [System.DateTime]::UtcNow.AddMilliseconds(1500)
+            while (-not $subscriptionReady -and [System.DateTime]::UtcNow -lt $sysDeadline) {
+                $rem = [int]($sysDeadline - [System.DateTime]::UtcNow).TotalMilliseconds
+                if ($rem -le 0) { break }
+                $res = Read-WsMessageWithTimeout $wsReader $rem
+
+                if ($res.Status -eq "Timeout") {
+                    # Optional system confirmation not sent in this window; in-flight receive task is preserved
+                    break
+                } elseif ($res.Status -eq "Close") {
+                    $closeDesc = if ($res.CloseDescription) { " ($($res.CloseStatus): $($res.CloseDescription))" } else { "" }
+                    return @{ Pass = $false; Status = 0; Message = "WebSocket closed by server during system confirmation window$closeDesc" }
+                } elseif ($res.Status -eq "Error") {
+                    return @{ Pass = $false; Status = 0; Message = "WebSocket transport error during system confirmation: $(Get-DetailedException $res.Exception $ws 'system_check')" }
+                } elseif ($res.Status -eq "Ok") {
+                    $sysMsgObj = $res.Message
+                    Log-WsMessageDiagnostic $sysMsgObj $wsStats
+                    if ($sysMsgObj.event -eq "system" -and $null -ne $sysMsgObj.payload) {
+                        $sp = $sysMsgObj.payload
+                        $isExtMatch = ($sp.extension -eq "postgres_changes")
+                        $isStatusOk = ($sp.status -eq "ok")
+                        $isChanMatch = ($sp.channel -eq "realtime:public:gesture_events" -or $sp.channel -eq "public:gesture_events")
+
+                        if ($isExtMatch -and $isStatusOk -and $isChanMatch) {
+                            $subscriptionReady = $true
+                            $readinessState = "system_confirmed"
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        Write-Host "    Realtime channel joined: $channelJoined | Readiness: $readinessState | Subscription IDs: [$(($subscriptionIds -join ', '))] (sub_details: $subDetails)"
 
         # 3. Fire a unique test gesture event
         $uniqueMag = 99.42
@@ -707,69 +894,146 @@ Run-Test "R8" "WebSocket subscribe to public:gesture_events INSERT and verify de
             return @{ Pass = $false; Status = $postRes.Status; Message = "Failed to trigger test event via REST: $($postRes.Body)" }
         }
 
-        # 4. Listen on WebSocket for delivery of event matching exact record
+        # 4. Listen on WebSocket for delivery of event matching exact record (Budget: 10000 ms)
         $eventReceived = $false
-        $listenCts = [System.Threading.CancellationTokenSource]::new(10000)
-        try {
-            while (-not $eventReceived) {
-                $msgObj = Read-FullWsMessage $ws $listenCts.Token
-                if ($null -eq $msgObj) {
-                    return @{ Pass = $false; Status = 0; Message = "WebSocket closed while waiting for Realtime event delivery" }
+        $eventSw = [System.Diagnostics.Stopwatch]::StartNew()
+        $eventDeadline = [System.DateTime]::UtcNow.AddMilliseconds(10000)
+
+        while (-not $eventReceived -and [System.DateTime]::UtcNow -lt $eventDeadline) {
+            $rem = [int]($eventDeadline - [System.DateTime]::UtcNow).TotalMilliseconds
+            if ($rem -le 0) { break }
+            $res = Read-WsMessageWithTimeout $wsReader $rem
+
+            if ($res.Status -eq "Timeout") {
+                break
+            } elseif ($res.Status -eq "Close") {
+                $closeDesc = if ($res.CloseDescription) { " ($($res.CloseStatus): $($res.CloseDescription))" } else { "" }
+                return @{ Pass = $false; Status = 0; Message = "WebSocket closed by server while waiting for Realtime event delivery$closeDesc" }
+            } elseif ($res.Status -eq "Error") {
+                return @{ Pass = $false; Status = 0; Message = "WebSocket transport error while waiting for event: $(Get-DetailedException $res.Exception $ws 'event_receive')" }
+            } elseif ($res.Status -eq "Ok") {
+                $msgObj = $res.Message
+                Log-WsMessageDiagnostic $msgObj $wsStats
+
+                # Check if system message arrives during event phase
+                if ($msgObj.event -eq "system" -and $null -ne $msgObj.payload) {
+                    $sp = $msgObj.payload
+                    $isExtMatch = ($sp.extension -eq "postgres_changes")
+                    $isStatusOk = ($sp.status -eq "ok")
+                    $isChanMatch = ($sp.channel -eq "realtime:public:gesture_events" -or $sp.channel -eq "public:gesture_events")
+                    if ($isExtMatch -and $isStatusOk -and $isChanMatch) {
+                        $subscriptionReady = $true
+                        $readinessState = "system_confirmed"
+                    }
+                    continue
                 }
 
                 # Validate exact record structure:
-                # payload type is postgres_changes, schema=public, table=gesture_events, type=INSERT,
-                # record.session_id equals createdSessionId, record.magnitude equals 99.42
+                # Primary: raw Phoenix v1.0.0 protocol: payload.data.schema, payload.data.table, payload.data.type, payload.data.record
+                # Safe fallback: payload.schema, payload.table, payload.eventType, payload.new
                 if ($msgObj.event -eq "postgres_changes") {
-                    $data = $msgObj.payload.data
-                    if ($null -ne $data) {
-                        $schemaMatches = ($data.schema -eq "public")
-                        $tableMatches  = ($data.table -eq "gesture_events")
-                        $typeMatches   = ($data.type -eq "INSERT")
-                        $rec           = $data.record
+                    $p = $msgObj.payload
+                    $d = if ($p) { $p.data } else { $null }
 
-                        if ($schemaMatches -and $tableMatches -and $typeMatches -and $null -ne $rec) {
-                            $sessionMatches = ($rec.session_id -eq $createdSessionId)
-                            $magMatches     = ([Math]::Abs([double]$rec.magnitude - 99.42) -lt 0.001)
+                    # If incoming message includes subscription IDs, validate against join acknowledgement IDs
+                    $incomingSubIds = @()
+                    if ($p -and $p.ids) {
+                        $incomingSubIds = @($p.ids)
+                    } elseif ($p -and $p.subscription_ids) {
+                        $incomingSubIds = @($p.subscription_ids)
+                    } elseif ($d -and $d.ids) {
+                        $incomingSubIds = @($d.ids)
+                    }
 
-                            if ($sessionMatches -and $magMatches) {
-                                $eventReceived = $true
+                    if ($incomingSubIds.Count -gt 0 -and $subscriptionIds.Count -gt 0) {
+                        $matchedSubId = $false
+                        foreach ($subId in $incomingSubIds) {
+                            if ($subscriptionIds -contains $subId) {
+                                $matchedSubId = $true
                                 break
                             }
+                        }
+                        if (-not $matchedSubId) {
+                            Write-Host "    [WS RECV] Skipping postgres_changes message with unrelated subscription IDs: [$($incomingSubIds -join ', ')] (expected: [$($subscriptionIds -join ', ')])"
+                            continue
+                        }
+                    }
+
+                    $schema  = if ($d -and $d.schema) { $d.schema } elseif ($p -and $p.schema) { $p.schema } else { $null }
+                    $table   = if ($d -and $d.table) { $d.table } elseif ($p -and $p.table) { $p.table } else { $null }
+                    $evtType = if ($d -and $d.type) { $d.type } elseif ($p -and $p.eventType) { $p.eventType } elseif ($p -and $p.type) { $p.type } else { $null }
+                    $rec     = if ($d -and $null -ne $d.record) { $d.record } elseif ($p -and $null -ne $p.record) { $p.record } elseif ($p -and $null -ne $p.new) { $p.new } else { $null }
+
+                    $schemaMatches = ($schema -eq "public")
+                    $tableMatches  = ($table -eq "gesture_events")
+                    $typeMatches   = ($evtType -eq "INSERT")
+
+                    if ($schemaMatches -and $tableMatches -and $typeMatches -and $null -ne $rec) {
+                        $sessionMatches = ($rec.session_id -eq $createdSessionId)
+                        $magMatches     = ([Math]::Abs([double]$rec.magnitude - 99.42) -lt 0.001)
+
+                        if ($sessionMatches -and $magMatches) {
+                            $eventReceived = $true
+                            break
                         }
                     }
                 }
             }
-        } catch [System.AggregateException] {
-            if ($_.InnerException -is [System.OperationCanceledException]) {
-                return @{ Pass = $false; Status = 0; Message = "WebSocket connected and subscribed, but test event was not received within timeout (10s)" }
-            }
-            return @{ Pass = $false; Status = 0; Message = "Realtime WebSocket error while waiting for event: $_" }
-        } catch [System.OperationCanceledException] {
-            return @{ Pass = $false; Status = 0; Message = "WebSocket connected and subscribed, but test event was not received within timeout (10s)" }
-        } finally {
-            $listenCts.Dispose()
         }
-
-        # 5. Clean teardown
-        try {
-            if ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                $closeTask = $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "Closing test", [System.Threading.CancellationToken]::None)
-                $closeTask.Wait(2000)
-            }
-        } catch { }
+        $eventSw.Stop()
 
         if ($eventReceived) {
             return @{ Pass = $true; Status = 200; Message = "Realtime INSERT received and validated via WebSocket subscription" }
         } else {
-            return @{ Pass = $false; Status = 0; Message = "WebSocket connected and subscribed, but event was not received within timeout" }
+            $elapsedS = [Math]::Round($eventSw.Elapsed.TotalSeconds, 2)
+            $pgCount = $wsStats.PostgresChanges
+            $sysCount = $wsStats.System
+            $totCount = $wsStats.Total
+            $subIdsStr = ($subscriptionIds -join ', ')
+            return @{
+                Pass    = $false
+                Status  = 0
+                Message = "Event receive timed out after ${elapsedS}s | Stage: event_receive | WebSocket State: $($ws.State) | frames_received=$totCount (phx_reply=$($wsStats.PhxReply), system=$sysCount, postgres_changes=$pgCount) | join_ack=$channelJoined | sub_ids=[$subIdsStr] | system_confirmed=$subscriptionReady"
+            }
         }
 
     } catch {
-        return @{ Pass = $false; Status = 0; Message = "Realtime WebSocket error: $_" }
+        $ex = if ($_.Exception) { $_.Exception } else { $_ }
+        return @{ Pass = $false; Status = 0; Message = "Realtime WebSocket error: $(Get-DetailedException $ex $ws 'general')" }
     } finally {
-        if ($ws) { $ws.Dispose() }
-        if ($connectCts) { $connectCts.Dispose() }
+        if (-not $statsEmitted) {
+            Write-Host "    [WS STATS] Total=$($wsStats.Total) | phx_reply=$($wsStats.PhxReply) | system=$($wsStats.System) | postgres_changes=$($wsStats.PostgresChanges) | unrecognized=$($wsStats.Unrecognized)"
+            $statsEmitted = $true
+        }
+        if ($ws) {
+            try {
+                # Handle completed pending task safely before deciding teardown action
+                if ($wsReader -and $wsReader.PendingTask -and $wsReader.PendingTask.IsCompleted) {
+                    if ($wsReader.PendingTask.IsFaulted) {
+                        $null = $wsReader.PendingTask.Exception
+                    }
+                    $wsReader.PendingTask = $null
+                }
+
+                $hasPendingReceive = ($wsReader -and $wsReader.PendingTask -and -not $wsReader.PendingTask.IsCompleted)
+                if ($hasPendingReceive) {
+                    # Incomplete pending receive exists: abort socket to terminate receive without concurrent CloseAsync
+                    try { $ws.Abort() } catch { }
+                    $wsReader.PendingTask = $null
+                } elseif ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+                    # No pending receive and socket is Open: bounded graceful close handshake
+                    $closeTask = $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "Closing test", [System.Threading.CancellationToken]::None)
+                    $null = $closeTask.Wait(2000)
+                }
+            } catch { }
+            try { $ws.Dispose() } catch { }
+        }
+        if ($wsReader -and $wsReader.Memory) {
+            try { $wsReader.Memory.Dispose() } catch { }
+        }
+        if ($connectCts) {
+            try { $connectCts.Dispose() } catch { }
+        }
     }
 }
 
