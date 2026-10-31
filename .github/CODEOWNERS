@@ -12,8 +12,6 @@
 /gradle.properties @IntegrationCaptain
 /.gitignore @IntegrationCaptain
 /local.properties.example @IntegrationCaptain
-/docs/DECISIONS.md @IntegrationCaptain
-/docs/MASTER_AMENDMENTS.md @IntegrationCaptain
 
 # Core Contracts: Owner Agent / Integration Captain (CCR only)
 /core/ @IntegrationCaptain
@@ -51,3 +49,6 @@
 /docs/P4_backend.md @Person4
 /README.md @Person4
 
+# Specific Owner Agent / Captain append-only documents (placed below /docs/ so last-rule-wins applies)
+/docs/DECISIONS.md @IntegrationCaptain
+/docs/MASTER_AMENDMENTS.md @IntegrationCaptain
