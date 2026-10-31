@@ -8,6 +8,7 @@ import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -54,7 +55,8 @@ import kotlin.coroutines.resumeWithException
 class HandSingleTracker(
     private val context: Context,
     private val externalLifecycleOwner: LifecycleOwner? = null,
-    private val modelAssetPath: String = DEFAULT_MODEL_PATH
+    private val modelAssetPath: String = DEFAULT_MODEL_PATH,
+    private val previewSurfaceProvider: Preview.SurfaceProvider? = null
 ) : Tracker {
 
     companion object {
@@ -165,7 +167,19 @@ class HandSingleTracker(
                 internalOwner
             }
 
-            provider.bindToLifecycle(lifecycleToBind, cameraSelector, imageAnalysis)
+            val preview = previewSurfaceProvider?.let { providerCallback ->
+                Preview.Builder()
+                    .setResolutionSelector(resolutionSelector)
+                    .build().also {
+                        it.setSurfaceProvider(providerCallback)
+                    }
+            }
+
+            if (preview != null) {
+                provider.bindToLifecycle(lifecycleToBind, cameraSelector, preview, imageAnalysis)
+            } else {
+                provider.bindToLifecycle(lifecycleToBind, cameraSelector, imageAnalysis)
+            }
             Log.i(TAG, "CameraX front camera bound for HAND_SINGLE in mode $perf (session $sessionId)")
         }
     }
