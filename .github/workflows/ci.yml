@@ -1,0 +1,74 @@
+name: Android CI
+
+'on':
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run Kotlin JVM Unit Tests (:fakes)
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.java.home=${{ env.JAVA_HOME }}"
+        run: |
+          ./gradlew :fakes:testDebugUnitTest \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            --stacktrace
+
+      - name: Build Debug and Release APKs
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.java.home=${{ env.JAVA_HOME }}"
+        run: |
+          ./gradlew :app:assembleDebug :app:assembleRelease \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            --stacktrace
+
+      - name: Verify APK outputs
+        run: |
+          echo "=== Debug APK outputs ==="
+          ls -la app/build/outputs/apk/debug/
+          echo "=== Release APK outputs ==="
+          ls -la app/build/outputs/apk/release/
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zorbi-app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zorbi-app-release
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 14
