@@ -1,0 +1,53 @@
+# ZORBI Code Ownership Specification
+# Authoritative source: ZORBI Master Prompt (v1.1), Section 7.1
+
+# Default fallback: Integration Captain
+* @IntegrationCaptain
+
+# Captain ONLY: Shared build tooling & root config (CCR only)
+/build.gradle.kts @IntegrationCaptain
+/settings.gradle.kts @IntegrationCaptain
+/gradle/ @IntegrationCaptain
+/gradle/libs.versions.toml @IntegrationCaptain
+/gradle.properties @IntegrationCaptain
+/.gitignore @IntegrationCaptain
+/local.properties.example @IntegrationCaptain
+/docs/DECISIONS.md @IntegrationCaptain
+/docs/MASTER_AMENDMENTS.md @IntegrationCaptain
+
+# Core Contracts: Owner Agent / Integration Captain (CCR only)
+/core/ @IntegrationCaptain
+
+# Person 1: Vision & Calibration
+/vision/ @Person1
+/calib/ @Person1
+/fakes/src/main/java/com/zorbi/fakes/p1/ @Person1
+/docs/P1_vision.md @Person1
+
+# Person 2: Gesture, Input & Engine
+/gesture/ @Person2
+/input/ @Person2
+/engine/ @Person2
+/fakes/src/main/java/com/zorbi/fakes/p2/ @Person2
+/docs/P2_engine.md @Person2
+
+# Person 3: App Shell, UI & Setup Wizard
+/app/ @Person3
+/app/src/main/AndroidManifest.xml @IntegrationCaptain
+/app/src/main/java/com/zorbi/app/RealAppGraph.kt @IntegrationCaptain
+/ui/ @Person3
+/docs/P3_ui.md @Person3
+
+# Person 4: Backend, Data, Tools, CI, Docs & Demo
+/data/ @Person4
+/fakes/src/main/java/com/zorbi/fakes/p4/ @Person4
+/supabase/ @Person4
+/web/ @Person4
+/tools/ @Person4
+/fixtures/ @Person4
+/scripts/ @Person4
+/.github/ @Person4
+/docs/ @Person4
+/docs/P4_backend.md @Person4
+/README.md @Person4
+

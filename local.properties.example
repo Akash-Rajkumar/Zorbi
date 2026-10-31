@@ -1,0 +1,10 @@
+## This file is a template. Copy to local.properties and fill in your local paths and keys.
+## DO NOT commit local.properties to version control.
+
+# Location of the Android SDK
+sdk.dir=C:\\Users\\<username>\\AppData\\Local\\Android\\Sdk
+
+# Supabase configuration (for Person 4 backend/telemetry integration)
+SUPABASE_URL=https://<your-project>.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOi...
+
