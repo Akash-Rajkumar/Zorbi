@@ -32,5 +32,10 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
-}
 
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.truth)
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:rules:1.5.0")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+}
