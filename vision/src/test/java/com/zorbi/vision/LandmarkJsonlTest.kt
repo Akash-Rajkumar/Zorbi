@@ -249,5 +249,52 @@ class LandmarkJsonlTest {
             LandmarkJsonl.deserialize(json)
         }
     }
-}
 
+    private fun create33PoseLandmarks(startX: Float = 0.4f, startY: Float = 0.3f, startZ: Float = 0.0f): List<Pt> {
+        return (0 until 33).map { i ->
+            Pt(
+                x = (startX + i * 0.01f),
+                y = (startY + i * 0.01f),
+                z = (startZ + i * 0.002f)
+            )
+        }
+    }
+
+    @Test
+    fun serialize_poseFrame_matchesSection53Format() {
+        val landmarks = create33PoseLandmarks(startX = 0.4f, startY = 0.3f, startZ = 0.0f)
+        val frame = PoseFrame(tsNanos = 123456790L, score = 0.88f, landmarks = landmarks)
+
+        val json = LandmarkJsonl.serialize(frame, TrackerId.POSE_LITE)
+
+        assertThat(json).contains("\"t\":123456790")
+        assertThat(json).contains("\"tracker\":\"POSE_LITE\"")
+        assertThat(json).contains("\"score\":0.88")
+        assertThat(json).contains("\"lm\":[[0.4,0.3,0.0]")
+    }
+
+    @Test
+    fun roundTrip_poseFrame_preservesAll33LandmarksAndScore() {
+        val landmarks = create33PoseLandmarks(startX = 0.25f, startY = 0.45f, startZ = -0.05f)
+        val frame = PoseFrame(tsNanos = 9988776655L, score = 0.94f, landmarks = landmarks)
+
+        val serialized = LandmarkJsonl.serialize(frame, TrackerId.POSE_LITE)
+        val record = LandmarkJsonl.deserializeRecord(serialized)
+
+        assertThat(record.trackerId).isEqualTo(TrackerId.POSE_LITE)
+        assertThat(record.timestampNanos).isEqualTo(9988776655L)
+        val deserializedPose = record.poseFrame
+        assertThat(deserializedPose).isNotNull()
+        assertThat(deserializedPose!!.tsNanos).isEqualTo(frame.tsNanos)
+        assertThat(deserializedPose.score).isEqualTo(0.94f)
+        assertThat(deserializedPose.landmarks).hasSize(33)
+
+        for (i in 0 until 33) {
+            val expectedPt = landmarks[i]
+            val actualPt = deserializedPose.landmarks[i]
+            assertThat(actualPt.x).isEqualTo(expectedPt.x)
+            assertThat(actualPt.y).isEqualTo(expectedPt.y)
+            assertThat(actualPt.z).isEqualTo(expectedPt.z)
+        }
+    }
+}

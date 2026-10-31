@@ -64,6 +64,101 @@ class CoordinateTransformsTest {
         assertThat(transformed[0].x).isWithin(1e-5f).of(1.0f)
         assertThat(transformed[20].x).isWithin(1e-5f).of(0.0f)
     }
+
+    @Test
+    fun rotateNormalizedPoint_handlesAllQuarterTurns() {
+        val p = Pt(x = 0.2f, y = 0.4f, z = 0.1f)
+
+        val r0 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 0)
+        assertThat(r0.x).isWithin(1e-5f).of(0.2f)
+        assertThat(r0.y).isWithin(1e-5f).of(0.4f)
+
+        val r90 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 90)
+        assertThat(r90.x).isWithin(1e-5f).of(0.6f)
+        assertThat(r90.y).isWithin(1e-5f).of(0.2f)
+
+        val r180 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 180)
+        assertThat(r180.x).isWithin(1e-5f).of(0.8f)
+        assertThat(r180.y).isWithin(1e-5f).of(0.6f)
+
+        val r270 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 270)
+        assertThat(r270.x).isWithin(1e-5f).of(0.4f)
+        assertThat(r270.y).isWithin(1e-5f).of(0.8f)
+    }
+
+    @Test
+    fun rotateNormalizedPoint_handlesNegativeAndWrappedAngles() {
+        val p = Pt(x = 0.3f, y = 0.7f, z = 0f)
+        val rNeg90 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, -90)
+        val r270 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 270)
+
+        assertThat(rNeg90.x).isWithin(1e-5f).of(r270.x)
+        assertThat(rNeg90.y).isWithin(1e-5f).of(r270.y)
+
+        val r360 = CoordinateTransforms.rotateNormalizedPoint(p.x, p.y, p.z, 360)
+        assertThat(r360.x).isWithin(1e-5f).of(0.3f)
+        assertThat(r360.y).isWithin(1e-5f).of(0.7f)
+    }
+
+    @Test
+    fun mapToViewSpace_fillStretchesBothAxesCorrectly() {
+        val center = Pt(0.5f, 0.5f)
+        val mappedCenter = CoordinateTransforms.mapToViewSpace(
+            center,
+            srcWidth = 960f,
+            srcHeight = 1280f,
+            dstWidth = 1080f,
+            dstHeight = 2400f,
+            scaleType = CoordinateTransforms.ScaleType.FILL
+        )
+        assertThat(mappedCenter.x).isWithin(1e-4f).of(540f)
+        assertThat(mappedCenter.y).isWithin(1e-4f).of(1200f)
+
+        val corner = Pt(1.0f, 1.0f)
+        val mappedCorner = CoordinateTransforms.mapToViewSpace(
+            corner,
+            srcWidth = 960f,
+            srcHeight = 1280f,
+            dstWidth = 1080f,
+            dstHeight = 2400f,
+            scaleType = CoordinateTransforms.ScaleType.FILL
+        )
+        assertThat(mappedCorner.x).isWithin(1e-4f).of(1080f)
+        assertThat(mappedCorner.y).isWithin(1e-4f).of(2400f)
+    }
+
+    @Test
+    fun mapToViewSpace_centerCropPreservesAspectRatioAndCenters() {
+        val center = Pt(0.5f, 0.5f)
+        // Tall phone: 1080x2400 (aspect 0.45), camera: 960x1280 (aspect 0.75)
+        val mapped = CoordinateTransforms.mapToViewSpace(
+            center,
+            srcWidth = 960f,
+            srcHeight = 1280f,
+            dstWidth = 1080f,
+            dstHeight = 2400f,
+            scaleType = CoordinateTransforms.ScaleType.CENTER_CROP
+        )
+        // Center of view is (540, 1200)
+        assertThat(mapped.x).isWithin(1e-4f).of(540f)
+        assertThat(mapped.y).isWithin(1e-4f).of(1200f)
+    }
+
+    @Test
+    fun mapToViewSpace_fitCenterPreservesAspectRatioWithLetterbox() {
+        val center = Pt(0.5f, 0.5f)
+        val mapped = CoordinateTransforms.mapToViewSpace(
+            center,
+            srcWidth = 960f,
+            srcHeight = 1280f,
+            dstWidth = 1080f,
+            dstHeight = 2400f,
+            scaleType = CoordinateTransforms.ScaleType.FIT_CENTER
+        )
+        // Center of view is (540, 1200)
+        assertThat(mapped.x).isWithin(1e-4f).of(540f)
+        assertThat(mapped.y).isWithin(1e-4f).of(1200f)
+    }
 }
 
 class TrackerStatsCollectorTest {
@@ -110,4 +205,3 @@ class TrackerStatsCollectorTest {
         assertThat(stats.dropped).isEqualTo(0)
     }
 }
-

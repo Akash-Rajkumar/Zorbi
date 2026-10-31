@@ -7,7 +7,32 @@
         <activity
             android:name=".demo.HandSingleDemoActivity"
             android:exported="true"
-            android:label="ZORBI Vision Demo"
+            android:label="ZORBI Single Hand Demo"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".demo.HandDualWheelDemoActivity"
+            android:exported="true"
+            android:label="ZORBI Dual Hand Demo"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".demo.PoseLiteDemoActivity"
+            android:exported="true"
+            android:label="ZORBI Pose Demo"
+            android:launchMode="singleTop"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -132,7 +132,7 @@ class ReplayTracker(
             if (trimmed.isEmpty()) continue
 
             val record = LandmarkJsonl.deserializeRecord(trimmed)
-            val frame = record.frame
+            val frame: TrackerFrame = record.poseFrame ?: record.frame
 
             if (replayMode == ReplayMode.REALTIME && lastTimestampNanos != null) {
                 val deltaNanos = frame.tsNanos - lastTimestampNanos
@@ -209,4 +209,3 @@ class ReplayTracker(
         }
     }
 }
-

@@ -2,6 +2,7 @@ package com.zorbi.vision.demo
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -10,6 +11,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -19,9 +21,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import com.zorbi.calib.fist.FistDetector
 import com.zorbi.core.HandsFrame
+import com.zorbi.core.PauseToggle
 import com.zorbi.core.PerfMode
 import com.zorbi.vision.HandSingleTracker
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,7 +61,11 @@ class HandSingleDemoActivity : Activity(), LifecycleOwner {
     private lateinit var overlayView: LandmarkOverlayView
     private lateinit var statusTextView: TextView
     private lateinit var handTextView: TextView
+    private lateinit var fistTextView: TextView
     private lateinit var statsTextView: TextView
+
+    private val fistDetector = FistDetector()
+    private var pauseToggleCount = 0
 
     private var tracker: HandSingleTracker? = null
     @Volatile private var isTrackerStarted = false
@@ -140,12 +149,34 @@ class HandSingleDemoActivity : Activity(), LifecycleOwner {
         }
         hud.addView(handTextView)
 
+        fistTextView = TextView(this).apply {
+            text = "Fist: Open (Ready for ~1s hold)"
+            setTextColor(Color.parseColor("#4ADE80")) // Green
+            textSize = 15f
+            setPadding(0, 0, 0, 8)
+        }
+        hud.addView(fistTextView)
+
         statsTextView = TextView(this).apply {
             text = "FPS: -- | P50: -- | Dropped: 0"
             setTextColor(Color.LTGRAY)
             textSize = 14f
+            setPadding(0, 0, 0, 12)
         }
         hud.addView(statsTextView)
+
+        val switchButton = Button(this).apply {
+            text = "Switch to POSE_LITE Full-Body Demo"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#0284C7")) // Sky Blue 600
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(24, 12, 24, 12)
+            setOnClickListener {
+                startActivity(Intent(this@HandSingleDemoActivity, PoseLiteDemoActivity::class.java))
+            }
+        }
+        hud.addView(switchButton)
 
         root.addView(hud)
         setContentView(root)
@@ -193,6 +224,31 @@ class HandSingleDemoActivity : Activity(), LifecycleOwner {
                         handTextView.setTextColor(Color.parseColor("#FACC15")) // Yellow
                         overlayView.clear()
                     }
+
+                    // Evaluate Fist-to-Pause detection
+                    val events = fistDetector.onFrame(frame)
+                    for (event in events) {
+                        if (event is PauseToggle) {
+                            pauseToggleCount++
+                            Log.i(TAG, "PauseToggle emitted! Total events: $pauseToggleCount at ${event.tsNanos}")
+                            try {
+                                val logFile = File(filesDir, "pause_events.log")
+                                logFile.appendText("PauseToggle #$pauseToggleCount at tsNanos=${event.tsNanos} epochMs=${System.currentTimeMillis()}\n")
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    val (fistLabel, fistColor) = when (fistDetector.state) {
+                        FistDetector.State.NO_HAND -> Pair("Waiting for hand", Color.LTGRAY)
+                        FistDetector.State.OPEN -> Pair("Hand OPEN (Ready)", Color.parseColor("#4ADE80"))
+                        FistDetector.State.HOLDING -> {
+                            val pct = (fistDetector.holdProgress * 100).toInt()
+                            Pair("HOLDING FIST ($pct%)", Color.parseColor("#FACC15"))
+                        }
+                        FistDetector.State.TRIGGERED -> Pair("PAUSE TRIGGERED (Count: $pauseToggleCount)", Color.parseColor("#EF4444"))
+                    }
+                    fistTextView.text = "Fist-to-Pause: $fistLabel | Total Pauses: $pauseToggleCount"
+                    fistTextView.setTextColor(fistColor)
                 }
             }
         }
@@ -277,4 +333,3 @@ class HandSingleDemoActivity : Activity(), LifecycleOwner {
         }
     }
 }
-

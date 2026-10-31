@@ -77,7 +77,11 @@ class HandSingleTracker(
 
     private val sessionCounter = AtomicLong(0L)
     @Volatile private var isRunning = false
+    @Volatile private var currentPerfMode: PerfMode? = null
     private val startStopMutex = Mutex()
+
+    val activePerfMode: PerfMode?
+        get() = currentPerfMode
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService? = null
@@ -89,10 +93,15 @@ class HandSingleTracker(
     private val pendingSubmissions = ConcurrentHashMap<Long, FrameSubmission>()
 
     override suspend fun start(perf: PerfMode) = startStopMutex.withLock {
+        if (isRunning && currentPerfMode == perf) {
+            Log.d(TAG, "Already running in mode $perf; skipping redundant start")
+            return@withLock
+        }
         if (isRunning) {
             stopInternal()
         }
         isRunning = true
+        currentPerfMode = perf
         val sessionId = sessionCounter.incrementAndGet()
         statsCollector.reset()
         pendingSubmissions.clear()
@@ -190,6 +199,7 @@ class HandSingleTracker(
 
     private suspend fun stopInternal() {
         isRunning = false
+        currentPerfMode = null
         sessionCounter.incrementAndGet() // Invalidate pending and in-flight callbacks
         pendingSubmissions.clear()
 
@@ -208,6 +218,7 @@ class HandSingleTracker(
 
         try {
             cameraExecutor?.shutdown()
+            cameraExecutor?.awaitTermination(300, java.util.concurrent.TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
             Log.e(TAG, "Error shutting down camera executor", e)
         }
@@ -243,13 +254,18 @@ class HandSingleTracker(
 
             val landmarker = handLandmarker ?: return
 
-            val bitmap = imageProxy.toBitmap()
+            val rawBitmap = imageProxy.toBitmap()
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-            val imageProcessingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(rotationDegrees)
-                .build()
 
-            val mpImage = BitmapImageBuilder(bitmap).build()
+            // Upright bitmap rotated before feeding to MediaPipe to avoid internal calculator skew
+            val rotatedBitmap = if (rotationDegrees != 0) {
+                val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+            } else {
+                rawBitmap
+            }
+
+            val mpImage = BitmapImageBuilder(rotatedBitmap).build()
 
             // Ensure strictly monotonic timestamp for MediaPipe LIVE_STREAM
             val timestampMs = synchronized(this) {
@@ -263,7 +279,7 @@ class HandSingleTracker(
             }
 
             pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId)
-            landmarker.detectAsync(mpImage, imageProcessingOptions, timestampMs)
+            landmarker.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during frame analysis in session $sessionId", e)
         } finally {
@@ -360,4 +376,3 @@ class HandSingleTracker(
         }
     }
 }
-
