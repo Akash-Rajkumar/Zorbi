@@ -289,8 +289,9 @@ class ReplayTrackerTest {
 
     @Test
     fun parseJsonlLines_rejectsDecreasingTimestamps() {
-        val line1 = """{"t":2000000000,"tracker":"POSE_LITE","score":0.95,"lm":${validPoseJson.substringAfter("\"lm\":")}}"""
-        val line2 = """{"t":1000000000,"tracker":"POSE_LITE","score":0.95,"lm":${validPoseJson.substringAfter("\"lm\":")}}"""
+        val poseBase = validPoseJson.replace("\n", "").replace(Regex("\\s+"), " ")
+        val line1 = poseBase.replace("\"t\":1000000000", "\"t\":2000000000")
+        val line2 = poseBase
         try {
             ReplayTracker.parseJsonlLines(sequenceOf(line1, line2))
             fail("Expected exception on decreasing timestamp")
@@ -508,16 +509,27 @@ class ReplayTrackerTest {
     // -------------------------------------------------------------------------
     @Test
     fun replayTracker_threadSafeLoadAndAccess() {
+        val singleLineJson = validHandJson.replace("\n", "").replace(Regex("\\s+"), " ")
         val tracker = ReplayTracker(TrackerId.HAND_SINGLE)
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
         val threads = (1..5).map {
             Thread {
-                tracker.loadJsonl(validHandJson)
-                val snapshot = tracker.loadedFrames
-                assertEquals(1, snapshot.size)
+                try {
+                    tracker.loadJsonl(singleLineJson)
+                    val snapshot = tracker.loadedFrames
+                    assertEquals(1, snapshot.size)
+                } catch (t: Throwable) {
+                    errors.add(t)
+                }
             }
         }
         threads.forEach { it.start() }
         threads.forEach { it.join() }
+
+        assertTrue(
+            "Worker threads encountered errors: ${errors.map { it.message }}",
+            errors.isEmpty()
+        )
         assertEquals(1, tracker.loadedFrames.size)
     }
 }
