@@ -258,52 +258,125 @@ def run_ascii(frames: List[Dict[str, Any]], fps: float = 30.0, frame_idx: Option
 # -----------------------------------------------------------------------------
 # Desktop Tkinter GUI Mode
 # -----------------------------------------------------------------------------
-def run_gui(frames: List[Dict[str, Any]], title: str = "Zorbi Landmark Viewer") -> None:
-    try:
-        import tkinter as tk
-        from tkinter import ttk
-    except ImportError:
-        print("Tkinter is not available in this Python environment. Falling back to ASCII mode.")
-        run_ascii(frames)
-        return
+class LandmarkViewerApp:
+    """
+    Tkinter desktop viewer for MediaPipe landmark sequences.
+    Implements robust callback synchronization preventing slider/renderer recursion loops.
+    """
 
-    root = tk.Tk()
-    root.title(title)
-    root.geometry("640x720")
+    def __init__(self, root: Any = None, frames: Optional[List[Dict[str, Any]]] = None, title: str = "Zorbi Landmark Viewer"):
+        self.root = root
+        self.frames = frames or []
+        self.total_frames = len(self.frames)
+        self.current_frame_idx = 0
+        self.is_playing = False
+        self._slider_updating = False
+        self._play_after_id: Optional[str] = None
+        self._playback_generation = 0
+        self._slider_call_count = 0
+        self._render_call_count = 0
 
-    canvas_width = 560
-    canvas_height = 560
+        self.canvas_width = 560
+        self.canvas_height = 560
 
-    current_frame_idx = [0]
-    is_playing = [False]
+        self.info_var = None
+        self.info_label = None
+        self.canvas = None
+        self.slider = None
+        self.play_btn = None
+        self.first_btn = None
+        self.prev_btn = None
+        self.next_btn = None
+        self.last_btn = None
 
-    info_var = tk.StringVar()
+        is_real_tk = False
+        if self.root is not None and self._is_alive():
+            try:
+                import tkinter as tk
+                if hasattr(self.root, "tk"):
+                    is_real_tk = True
+            except Exception:
+                is_real_tk = False
 
-    top_frame = ttk.Frame(root, padding=6)
-    top_frame.pack(fill=tk.X)
-    info_label = ttk.Label(top_frame, textvariable=info_var, font=("Consolas", 10))
-    info_label.pack(side=tk.LEFT)
+        if is_real_tk:
+            import tkinter as tk
+            from tkinter import ttk
 
-    canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg="#121212")
-    canvas.pack(pady=6)
+            self.root.title(title)
+            self.root.geometry("640x720")
 
-    def draw_current_frame():
-        canvas.delete("all")
-        idx = current_frame_idx[0]
-        frame = frames[idx]
+            self.info_var = tk.StringVar()
 
+            top_frame = ttk.Frame(self.root, padding=6)
+            top_frame.pack(fill=tk.X)
+            self.info_label = ttk.Label(top_frame, textvariable=self.info_var, font=("Consolas", 10))
+            self.info_label.pack(side=tk.LEFT)
+
+            self.canvas = tk.Canvas(self.root, width=self.canvas_width, height=self.canvas_height, bg="#121212")
+            self.canvas.pack(pady=6)
+
+            # Controls
+            ctrl_frame = ttk.Frame(self.root, padding=6)
+            ctrl_frame.pack(fill=tk.X)
+
+            self.first_btn = ttk.Button(ctrl_frame, text="|<", width=3, command=self.on_first)
+            self.first_btn.pack(side=tk.LEFT, padx=2)
+
+            self.prev_btn = ttk.Button(ctrl_frame, text="< Prev", command=self.on_prev)
+            self.prev_btn.pack(side=tk.LEFT, padx=2)
+
+            self.play_btn = ttk.Button(ctrl_frame, text="Play", command=self.toggle_play)
+            self.play_btn.pack(side=tk.LEFT, padx=2)
+
+            self.next_btn = ttk.Button(ctrl_frame, text="Next >", command=self.on_next)
+            self.next_btn.pack(side=tk.LEFT, padx=2)
+
+            self.last_btn = ttk.Button(ctrl_frame, text=">|", width=3, command=self.on_last)
+            self.last_btn.pack(side=tk.LEFT, padx=2)
+
+            max_idx = max(0, self.total_frames - 1)
+            self.slider = ttk.Scale(
+                ctrl_frame,
+                from_=0,
+                to=max_idx,
+                orient=tk.HORIZONTAL,
+                command=self.on_slider,
+            )
+            self.slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+
+            # Keyboard shortcuts
+            self.root.bind("<Left>", lambda e: self.on_prev())
+            self.root.bind("<Right>", lambda e: self.on_next())
+            self.root.bind("<Home>", lambda e: self.on_first())
+            self.root.bind("<End>", lambda e: self.on_last())
+            self.root.bind("<space>", lambda e: self.toggle_play())
+
+            self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Initial render: display frame 0 and synchronize slider with guard active
+        self.goto_frame(0, update_slider=True)
+
+    def render_canvas(self, frame: Dict[str, Any]) -> None:
+        """Renders the given frame landmarks and skeletal connections on the canvas."""
+        self._render_call_count += 1
+        if not self._is_alive() or self.canvas is None:
+            return
+
+        self.canvas.delete("all")
+        idx = self.current_frame_idx
         tracker = frame.get("tracker", "")
-        t_rel = (frame.get("t", 0) - frames[0].get("t", 0)) / 1e9
-        info_var.set(f"Frame {idx + 1}/{len(frames)} | {tracker} | +{t_rel:.3f} s")
-        slider.set(idx)
+        first_t = self.frames[0].get("t", 0) if self.frames else 0
+        t_rel = (frame.get("t", 0) - first_t) / 1e9
+        if self.info_var is not None:
+            self.info_var.set(f"Frame {idx + 1}/{self.total_frames} | {tracker} | +{t_rel:.3f} s")
 
-        # Draw coordinate guidelines
-        canvas.create_rectangle(10, 10, canvas_width - 10, canvas_height - 10, outline="#333333", width=1)
-        canvas.create_line(canvas_width / 2, 10, canvas_width / 2, canvas_height - 10, fill="#222222", dash=(2, 4))
-        canvas.create_line(10, canvas_height / 2, canvas_width - 10, canvas_height / 2, fill="#222222", dash=(2, 4))
+        cw, ch = self.canvas_width, self.canvas_height
+        self.canvas.create_rectangle(10, 10, cw - 10, ch - 10, outline="#333333", width=1)
+        self.canvas.create_line(cw / 2, 10, cw / 2, ch - 10, fill="#222222", dash=(2, 4))
+        self.canvas.create_line(10, ch / 2, cw - 10, ch / 2, fill="#222222", dash=(2, 4))
 
         def to_px(nx: float, ny: float) -> Tuple[float, float]:
-            return 10 + nx * (canvas_width - 20), 10 + ny * (canvas_height - 20)
+            return 10 + nx * (cw - 20), 10 + ny * (ch - 20)
 
         if tracker in {"HAND_SINGLE", "HAND_DUAL_WHEEL"}:
             for hand in frame.get("hands", []):
@@ -312,82 +385,168 @@ def run_gui(frames: List[Dict[str, Any]], title: str = "Zorbi Landmark Viewer") 
                 color = "#00E5FF" if side == "RIGHT" else "#FF4081"
                 line_color = "#00838F" if side == "RIGHT" else "#C2185B"
 
-                # Draw connections
+                # Draw skeletal connections
                 for a, b in HAND_CONNECTIONS:
                     if a < len(pts) and b < len(pts):
-                        canvas.create_line(pts[a][0], pts[a][1], pts[b][0], pts[b][1], fill=line_color, width=2)
+                        self.canvas.create_line(pts[a][0], pts[a][1], pts[b][0], pts[b][1], fill=line_color, width=2)
 
                 # Draw joint points
                 for p_idx, (px, py) in enumerate(pts):
                     r = 5 if p_idx in (4, 8, 12, 16, 20) else (6 if p_idx == 0 else 3)
                     p_col = "#FFEB3B" if p_idx in (4, 8, 12, 16, 20) else color
-                    canvas.create_oval(px - r, py - r, px + r, py + r, fill=p_col, outline="")
+                    self.canvas.create_oval(px - r, py - r, px + r, py + r, fill=p_col, outline="")
 
         elif tracker == "POSE_LITE":
             pts = [to_px(p["x"], p["y"]) for p in frame.get("lm", [])]
-            # Draw connections
             for a, b in POSE_CONNECTIONS:
                 if a < len(pts) and b < len(pts):
-                    canvas.create_line(pts[a][0], pts[a][1], pts[b][0], pts[b][1], fill="#388E3C", width=2)
-            # Draw points
+                    self.canvas.create_line(pts[a][0], pts[a][1], pts[b][0], pts[b][1], fill="#388E3C", width=2)
             for p_idx, (px, py) in enumerate(pts):
                 r = 4 if p_idx == 0 else 3
                 col = "#76FF03"
-                canvas.create_oval(px - r, py - r, px + r, py + r, fill=col, outline="")
+                self.canvas.create_oval(px - r, py - r, px + r, py + r, fill=col, outline="")
 
-    # Controls
-    ctrl_frame = ttk.Frame(root, padding=6)
-    ctrl_frame.pack(fill=tk.X)
+    def goto_frame(self, target_idx: int, update_slider: bool = True) -> int:
+        """
+        Navigates to the specified frame index, safely clamped to [0, total_frames - 1].
+        If update_slider is True, updates the slider position using callback guards to prevent recursion.
+        Does not attempt canvas or slider operations after the window has been destroyed.
+        """
+        if self.total_frames == 0:
+            return 0
+        clamped = max(0, min(self.total_frames - 1, int(target_idx)))
+        self.current_frame_idx = clamped
 
-    def on_prev():
-        is_playing[0] = False
-        current_frame_idx[0] = max(0, current_frame_idx[0] - 1)
-        draw_current_frame()
+        if not self._is_alive():
+            return clamped
 
-    def on_next():
-        is_playing[0] = False
-        current_frame_idx[0] = min(len(frames) - 1, current_frame_idx[0] + 1)
-        draw_current_frame()
+        self.render_canvas(self.frames[clamped])
 
-    def toggle_play():
-        is_playing[0] = not is_playing[0]
-        play_btn.config(text="Pause" if is_playing[0] else "Play")
-        if is_playing[0]:
-            play_loop()
+        if update_slider and self._is_alive() and self.slider is not None:
+            self._slider_updating = True
+            try:
+                self.slider.set(clamped)
+            finally:
+                self._slider_updating = False
 
-    def play_loop():
-        if is_playing[0]:
-            if current_frame_idx[0] + 1 < len(frames):
-                current_frame_idx[0] += 1
-                draw_current_frame()
-                root.after(33, play_loop)
-            else:
-                is_playing[0] = False
-                play_btn.config(text="Play")
+        return clamped
 
-    def on_slider(val):
-        current_frame_idx[0] = int(float(val))
-        draw_current_frame()
+    def on_slider(self, val: Any) -> None:
+        """
+        Callback invoked when the user scrubs or clicks the slider.
+        Guarded against re-entrant calls when the slider is set programmatically.
+        """
+        self._slider_call_count += 1
+        if self._slider_updating:
+            return
 
-    prev_btn = ttk.Button(ctrl_frame, text="< Prev", command=on_prev)
-    prev_btn.pack(side=tk.LEFT, padx=4)
+        try:
+            val_float = float(val)
+        except (ValueError, TypeError):
+            return
 
-    play_btn = ttk.Button(ctrl_frame, text="Play", command=toggle_play)
-    play_btn.pack(side=tk.LEFT, padx=4)
+        idx = int(round(val_float))
+        if self.is_playing:
+            self.stop_playback()
 
-    next_btn = ttk.Button(ctrl_frame, text="Next >", command=on_next)
-    next_btn.pack(side=tk.LEFT, padx=4)
+        # Update canvas without re-triggering slider.set to avoid callback loops
+        self.goto_frame(idx, update_slider=False)
 
-    slider = ttk.Scale(
-        ctrl_frame,
-        from_=0,
-        to=len(frames) - 1,
-        orient=tk.HORIZONTAL,
-        command=on_slider,
-    )
-    slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+    def on_prev(self) -> None:
+        if self.is_playing:
+            self.stop_playback()
+        self.goto_frame(self.current_frame_idx - 1, update_slider=True)
 
-    draw_current_frame()
+    def on_next(self) -> None:
+        if self.is_playing:
+            self.stop_playback()
+        self.goto_frame(self.current_frame_idx + 1, update_slider=True)
+
+    def on_first(self) -> None:
+        if self.is_playing:
+            self.stop_playback()
+        self.goto_frame(0, update_slider=True)
+
+    def on_last(self) -> None:
+        if self.is_playing:
+            self.stop_playback()
+        self.goto_frame(self.total_frames - 1, update_slider=True)
+
+    def toggle_play(self) -> None:
+        if self.is_playing:
+            self.stop_playback()
+        else:
+            self.start_playback()
+
+    def start_playback(self) -> None:
+        if self.total_frames <= 1 or self.is_playing:
+            return
+        if self.current_frame_idx >= self.total_frames - 1:
+            self.goto_frame(0, update_slider=True)
+        self._playback_generation += 1
+        self.is_playing = True
+        if self._is_alive() and self.play_btn is not None:
+            self.play_btn.config(text="Pause")
+        self._schedule_next_step()
+
+    def stop_playback(self) -> None:
+        self._playback_generation += 1
+        self.is_playing = False
+        if self._play_after_id is not None:
+            if self._is_alive():
+                try:
+                    self.root.after_cancel(self._play_after_id)
+                except Exception:
+                    pass
+            self._play_after_id = None
+        if self._is_alive() and self.play_btn is not None:
+            self.play_btn.config(text="Play")
+
+    def _schedule_next_step(self) -> None:
+        if not self.is_playing or not self._is_alive():
+            return
+        if self._play_after_id is not None:
+            # Prevent duplicate pending timer callbacks
+            return
+        current_gen = self._playback_generation
+        self._play_after_id = self.root.after(33, lambda g=current_gen: self._play_step(g))
+
+    def _play_step(self, generation: Optional[int] = None) -> None:
+        if generation is not None and generation != self._playback_generation:
+            return
+        if not self.is_playing or not self._is_alive():
+            return
+        self._play_after_id = None
+        if self.current_frame_idx + 1 < self.total_frames:
+            self.goto_frame(self.current_frame_idx + 1, update_slider=True)
+            self._schedule_next_step()
+        else:
+            self.stop_playback()
+
+    def _is_alive(self) -> bool:
+        if self.root is None:
+            return False
+        try:
+            return bool(self.root.winfo_exists())
+        except Exception:
+            return False
+
+    def on_close(self) -> None:
+        self.stop_playback()
+        if self._is_alive():
+            self.root.destroy()
+
+
+def run_gui(frames: List[Dict[str, Any]], title: str = "Zorbi Landmark Viewer") -> None:
+    try:
+        import tkinter as tk
+    except ImportError:
+        print("Tkinter is not available in this Python environment. Falling back to ASCII mode.")
+        run_ascii(frames)
+        return
+
+    root = tk.Tk()
+    app = LandmarkViewerApp(root, frames, title=title)
     root.mainloop()
 
 

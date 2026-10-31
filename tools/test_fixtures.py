@@ -26,6 +26,7 @@ EXPECTED_FIXTURES = {
 
 pass_count = 0
 fail_count = 0
+skip_count = 0
 
 
 def assert_test(name: str, condition: bool, details: str = ""):
@@ -36,6 +37,12 @@ def assert_test(name: str, condition: bool, details: str = ""):
     else:
         print(f"  [FAIL] {name} - {details}", file=sys.stderr)
         fail_count += 1
+
+
+def record_skip(name: str, reason: str):
+    global skip_count
+    print(f"  [SKIP] {name} - {reason}")
+    skip_count += 1
 
 
 def compute_sha256(path: Path) -> str:
@@ -276,6 +283,258 @@ def test_viewer_smoke():
 
 
 # -----------------------------------------------------------------------------
+# Test 6: GUI Callback Synchronization & Navigation
+# -----------------------------------------------------------------------------
+def is_display_available() -> bool:
+    """Checks if a graphical display environment can initialize Tk."""
+    try:
+        import tkinter as tk
+        r = tk.Tk()
+        r.withdraw()
+        r.destroy()
+        return True
+    except Exception:
+        return False
+
+
+def test_gui_callback_logic_headless():
+    """Headless verification of slider callback synchronization and state transitions without display."""
+    print("\n--- Test 6a: Headless Callback Synchronization Logic ---")
+    try:
+        from tools.landmark_viewer import LandmarkViewerApp, load_jsonl_fixture
+    except ImportError:
+        sys.path.insert(0, str(Path(".").resolve()))
+        from tools.landmark_viewer import LandmarkViewerApp, load_jsonl_fixture
+
+    frames = load_jsonl_fixture(FIXTURES_DIR / "swipe.jsonl")
+
+    # Mock root to verify playback timer logic without a graphical display server
+    class MockRoot:
+        def __init__(self):
+            self._exists = True
+            self.after_calls = []
+            self.canceled_calls = []
+            self._counter = 0
+
+        def winfo_exists(self):
+            return self._exists
+
+        def after(self, ms, callback):
+            self._counter += 1
+            job_id = f"after_job_{self._counter}"
+            self.after_calls.append((job_id, ms, callback))
+            return job_id
+
+        def after_cancel(self, job_id):
+            self.canceled_calls.append(job_id)
+
+        def destroy(self):
+            self._exists = False
+
+    mock_root = MockRoot()
+    app = LandmarkViewerApp(mock_root, frames)
+
+    # 1. Initial state
+    assert_test("Headless: initial frame is 0", app.current_frame_idx == 0)
+
+    # 2. Rendering frame does not invoke slider callback
+    initial_slider_calls = app._slider_call_count
+    app.render_canvas(frames[5])
+    assert_test(
+        "Headless: rendering does not invoke slider callback",
+        app._slider_call_count == initial_slider_calls,
+    )
+
+    # 3. Manual slider movement updates displayed frame
+    app.on_slider("12.0")
+    assert_test("Headless: manual slider updates frame to 12", app.current_frame_idx == 12)
+
+    # 4. Programmatic slider updates render without recursion
+    render_calls_before = app._render_call_count
+    app.goto_frame(15, update_slider=True)
+    assert_test(
+        "Headless: programmatic update renders without recursion",
+        app.current_frame_idx == 15 and app._render_call_count == render_calls_before + 1,
+    )
+
+    # 5. First, last, and relative navigation
+    app.on_first()
+    assert_test("Headless: first frame sets index to 0", app.current_frame_idx == 0)
+    app.on_last()
+    assert_test("Headless: last frame sets index to len - 1", app.current_frame_idx == len(frames) - 1)
+    app.goto_frame(10)
+    app.on_next()
+    assert_test("Headless: on_next increments frame to 11", app.current_frame_idx == 11)
+    app.on_prev()
+    assert_test("Headless: on_prev decrements frame to 10", app.current_frame_idx == 10)
+
+    # 6. Invalid frame indices are safely bounded
+    app.goto_frame(-10)
+    assert_test("Headless: negative index clamps to 0", app.current_frame_idx == 0)
+    app.goto_frame(9999)
+    assert_test("Headless: over-range index clamps to last frame", app.current_frame_idx == len(frames) - 1)
+    app.on_slider("not_a_number")
+    assert_test("Headless: non-numeric slider input ignored safely", app.current_frame_idx == len(frames) - 1)
+
+    # 7. Playback scheduling and cancellation
+    app.goto_frame(0)
+    app.start_playback()
+    assert_test("Headless: start_playback schedules timer callback", app.is_playing and app._play_after_id is not None)
+    first_job = app._play_after_id
+
+    # 8. Repeated start requests cannot create duplicate scheduled callbacks
+    app.start_playback()
+    assert_test("Headless: repeated start does not create duplicate callback", app._play_after_id == first_job)
+
+    # 9. Scheduled callback is cancelled when playback stops
+    app.stop_playback()
+    assert_test(
+        "Headless: stop_playback cancels scheduled callback",
+        not app.is_playing and app._play_after_id is None and first_job in mock_root.canceled_calls,
+    )
+
+    # 10. Invoking stale callback after stop does not advance frame
+    idx_before_stale = app.current_frame_idx
+    app._play_step()
+    assert_test("Headless: stale callback after stop does not advance frame", app.current_frame_idx == idx_before_stale)
+
+    # 11. Closing window cancels pending callback
+    app.start_playback()
+    pending_job = app._play_after_id
+    app.on_close()
+    assert_test(
+        "Headless: window close cancels pending callbacks",
+        not app.is_playing and app._play_after_id is None and pending_job in mock_root.canceled_calls,
+    )
+
+    # 12. Lifecycle hardening: goto_frame after destroy does not crash
+    assert_test("Headless: goto_frame after destroy returns safely", app.goto_frame(5) == 5)
+
+    # 13. Playback Generation Token Tracking Regression Test
+    mock_root_gen = MockRoot()
+    app_gen = LandmarkViewerApp(mock_root_gen, frames)
+
+    # Start playback session A
+    app_gen.start_playback()
+    call_A = mock_root_gen.after_calls[-1][2]
+    timer_id_A = app_gen._play_after_id
+    assert_test("GenTest: session A started with valid timer ID", app_gen.is_playing and timer_id_A is not None)
+
+    # Stop playback A
+    app_gen.stop_playback()
+    assert_test("GenTest: session A stopped", not app_gen.is_playing and app_gen._play_after_id is None)
+
+    # Start playback session B
+    app_gen.start_playback()
+    call_B = mock_root_gen.after_calls[-1][2]
+    timer_id_B = app_gen._play_after_id
+    total_scheduled_before_stale = len(mock_root_gen.after_calls)
+    assert_test(
+        "GenTest: session B started with new timer ID",
+        app_gen.is_playing and timer_id_B is not None and timer_id_B != timer_id_A,
+    )
+
+    # Invoke stale callback A
+    call_A()
+    assert_test("GenTest: session B remains active after stale callback A", app_gen.is_playing is True)
+    assert_test("GenTest: callback B timer ID remains intact", app_gen._play_after_id == timer_id_B)
+    assert_test(
+        "GenTest: no additional timer was scheduled by stale callback A",
+        len(mock_root_gen.after_calls) == total_scheduled_before_stale,
+    )
+
+    # Invoke callback B and verify normal frame advancement
+    current_idx_before_B = app_gen.current_frame_idx
+    call_B()
+    assert_test("GenTest: callback B advances frame normally", app_gen.current_frame_idx == current_idx_before_B + 1)
+    assert_test(
+        "GenTest: callback B scheduled next step",
+        len(mock_root_gen.after_calls) == total_scheduled_before_stale + 1,
+    )
+
+
+def test_gui_widget_integration():
+    """Integration test with live Tkinter widgets, exercising ttk.Scale and canvas event loop."""
+    print("\n--- Test 6b: Live GUI Widget Integration (ttk.Scale & Window) ---")
+    if not is_display_available():
+        record_skip("Live GUI Widget Integration", "Graphical display unavailable for Tkinter")
+        return
+
+    try:
+        import tkinter as tk
+        try:
+            from tools.landmark_viewer import LandmarkViewerApp, load_jsonl_fixture
+        except ImportError:
+            sys.path.insert(0, str(Path(".").resolve()))
+            from tools.landmark_viewer import LandmarkViewerApp, load_jsonl_fixture
+    except Exception as e:
+        record_skip("Live GUI Widget Integration", f"Tkinter import failed: {e}")
+        return
+
+    frames = load_jsonl_fixture(FIXTURES_DIR / "swipe.jsonl")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = LandmarkViewerApp(root, frames)
+
+        # 1. Widget instantiation and initial state
+        assert_test("Live GUI: slider widget instantiated", app.slider is not None)
+        assert_test("Live GUI: initial frame is 0", app.current_frame_idx == 0)
+        assert_test("Live GUI: initial slider value is 0", abs(app.slider.get() - 0.0) < 0.01)
+
+        # 2. Exercise actual ttk.Scale widget command callback
+        app.slider.set(15)
+        root.update()
+        assert_test("Live GUI: ttk.Scale command updates frame index to 15", app.current_frame_idx == 15)
+        assert_test("Live GUI: info label reflects frame 16", "Frame 16/" in app.info_var.get())
+
+        # 3. Verify programmatic slider updates do not cause recursive rendering
+        render_before = app._render_call_count
+        app.goto_frame(20, update_slider=True)
+        root.update()
+        assert_test(
+            "Live GUI: programmatic update renders once without recursion",
+            app.current_frame_idx == 20 and app._render_call_count == render_before + 1,
+        )
+
+        # 4. First and last frame button interactions
+        app.on_first()
+        root.update()
+        assert_test("Live GUI: first button sets frame to 0", app.current_frame_idx == 0)
+        app.on_last()
+        root.update()
+        assert_test("Live GUI: last button sets frame to 29", app.current_frame_idx == len(frames) - 1)
+
+        # 5. Playback start and button label consistency
+        app.goto_frame(0)
+        app.start_playback()
+        assert_test("Live GUI: play button text becomes Pause", app.play_btn.cget("text") == "Pause")
+        assert_test("Live GUI: play after id is scheduled", app._play_after_id is not None)
+
+        # 6. Playback step advances frame
+        app._play_step()
+        assert_test("Live GUI: playback step advances frame", app.current_frame_idx == 1)
+
+        # 7. Playback stop resets button text and cancels callback
+        app.stop_playback()
+        assert_test("Live GUI: play button resets to Play", app.play_btn.cget("text") == "Play")
+        assert_test("Live GUI: after callback cancelled", app._play_after_id is None)
+
+        # 8. Window close cancels pending callback
+        app.start_playback()
+        assert_test("Live GUI: playback active before close", app.is_playing is True)
+        app.on_close()
+        assert_test("Live GUI: window close stops playback and clears after_id", not app.is_playing and app._play_after_id is None)
+        assert_test("Live GUI: goto_frame after close returns clamped index safely", app.goto_frame(10) == 10)
+    finally:
+        try:
+            if root.winfo_exists():
+                root.destroy()
+        except Exception:
+            pass
+
+
+# -----------------------------------------------------------------------------
 # Unittest TestCase Wrapper
 # -----------------------------------------------------------------------------
 class TestFixtures(unittest.TestCase):
@@ -299,6 +558,16 @@ class TestFixtures(unittest.TestCase):
         test_viewer_smoke()
         self.assertEqual(fail_count, 0)
 
+    def test_06_gui_callback_logic_headless(self):
+        test_gui_callback_logic_headless()
+        self.assertEqual(fail_count, 0)
+
+    def test_07_gui_widget_integration(self):
+        if not is_display_available():
+            self.skipTest("Graphical display unavailable for Tkinter")
+        test_gui_widget_integration()
+        self.assertEqual(fail_count, 0)
+
 
 # -----------------------------------------------------------------------------
 # Main Runner
@@ -313,9 +582,11 @@ def main():
     test_all_fixtures()
     test_malformed_rejections()
     test_viewer_smoke()
+    test_gui_callback_logic_headless()
+    test_gui_widget_integration()
 
     print("=================================================================")
-    print(f"RESULTS: Passed={pass_count}, Failed={fail_count}")
+    print(f"RESULTS: Passed={pass_count}, Failed={fail_count}, Skipped={skip_count}")
     print("=================================================================")
     if fail_count > 0:
         sys.exit(1)
