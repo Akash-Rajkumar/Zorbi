@@ -333,6 +333,177 @@ class ReplayTrackerTest {
     }
 
     // -------------------------------------------------------------------------
+    // 3b. Strict Trailing-Content & Root Structure Regression Tests
+    // -------------------------------------------------------------------------
+    @Test
+    fun parseJsonlLine_rejectsTrailingGarbage() {
+        val json = "$validHandJson garbage"
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on trailing garbage")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Unexpected trailing content") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsTrailingJsonObject() {
+        val json = """$validHandJson {"extra": 123}"""
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on trailing JSON object")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Unexpected trailing content") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsTrailingPunctuation() {
+        val json = "$validHandJson ,"
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on trailing punctuation")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Unexpected trailing content") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_acceptsTrailingWhitespace() {
+        val json = "$validHandJson   \t \r\n  "
+        val frame = ReplayTracker.parseJsonlLine(json, 1)
+        assertNotNull(frame)
+        assertEquals(1000000000L, frame.tsNanos)
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsNonObjectRoot() {
+        val json = """["an", "array"]"""
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on non-object root")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Expected JSON object at root") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsUnclosedObject() {
+        val json = """{"t":1000000000,"tracker":"HAND_SINGLE""""
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on unclosed JSON object")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("Malformed JSON") == true)
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3c. Strict Timestamp Numeric & Range Regression Tests
+    // -------------------------------------------------------------------------
+    @Test
+    fun parseJsonlLine_acceptsIntegerTimestamp() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":1700000000000000000,")
+        val frame = ReplayTracker.parseJsonlLine(json, 1)
+        assertEquals(1700000000000000000L, frame.tsNanos)
+    }
+
+    @Test
+    fun parseJsonlLine_acceptsLongMaxTimestamp() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":${Long.MAX_VALUE},")
+        val frame = ReplayTracker.parseJsonlLine(json, 1)
+        assertEquals(Long.MAX_VALUE, frame.tsNanos)
+    }
+
+    @Test
+    fun parseJsonlLine_acceptsZeroTimestamp() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":0,")
+        val frame = ReplayTracker.parseJsonlLine(json, 1)
+        assertEquals(0L, frame.tsNanos)
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsFractionalTimestamp() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":1234.5,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on fractional timestamp")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("cannot be a fractional number") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsNegativeTimestampMinusOne() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":-1,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on negative timestamp -1")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("cannot be negative") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsNegativeTimestamp() {
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":-100,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on negative timestamp")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("cannot be negative") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsOutOfRangeTimestamp() {
+        // Exceeds Long.MAX_VALUE (9223372036854775807)
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":9223372036854775808,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on out-of-range timestamp")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("outside supported Long range") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsDecimalNotationTimestamp() {
+        // Decimal representation with .0 must be rejected by integer-token contract
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":9223372036854775807.0,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on decimal-token timestamp")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("must be an integer token") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLine_rejectsExponentNotationTimestamp() {
+        // Exponent notation must be rejected by integer-token contract
+        val json = validHandJson.replace("\"t\":1000000000,", "\"t\":1e3,")
+        try {
+            ReplayTracker.parseJsonlLine(json, 1)
+            fail("Expected exception on exponent-notation timestamp")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message?.contains("must be an integer token") == true)
+        }
+    }
+
+    @Test
+    fun parseJsonlLines_acceptsValidMonotonicSequence() {
+        val line1 = validPoseJson
+        val line2 = validPoseJson.replace("\"t\":1000000000", "\"t\":1033333333")
+        val line3 = validPoseJson.replace("\"t\":1000000000", "\"t\":1066666666")
+        val frames = ReplayTracker.parseJsonlLines(sequenceOf(line1, line2, line3))
+        assertEquals(3, frames.size)
+        assertEquals(1000000000L, frames[0].tsNanos)
+        assertEquals(1033333333L, frames[1].tsNanos)
+        assertEquals(1066666666L, frames[2].tsNanos)
+    }
+
+    // -------------------------------------------------------------------------
     // 4. Thread-Safety & Lifecycle Tests
     // -------------------------------------------------------------------------
     @Test

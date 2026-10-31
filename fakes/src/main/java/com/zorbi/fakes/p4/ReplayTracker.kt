@@ -131,15 +131,15 @@ class ReplayTracker(
         fun parseJsonlLine(line: String, lineNum: Int = 1): TrackerFrame {
             val parser = SimpleJsonParser(line)
             val root = try {
-                parser.parseValue() as? Map<String, Any?>
+                val value = parser.parseValue()
+                parser.ensureFullyConsumed()
+                value as? Map<String, Any?>
                     ?: throw IllegalArgumentException("Expected JSON object at root")
             } catch (e: Exception) {
                 throw IllegalArgumentException("Line $lineNum: Malformed JSON - ${e.message}", e)
             }
 
-            val tNum = root["t"] as? Number
-                ?: throw IllegalArgumentException("Line $lineNum: Missing or invalid timestamp 't'")
-            val tsNanos = tNum.toLong()
+            val tsNanos = parseTimestampNanos(root["t"], lineNum)
 
             val trackerStr = root["tracker"] as? String
                 ?: throw IllegalArgumentException("Line $lineNum: Missing or invalid 'tracker'")
@@ -253,6 +253,64 @@ class ReplayTracker(
                 throw IllegalArgumentException("Line $lineNum: $context must be a finite number, found $valFloat")
             }
         }
+
+        /**
+         * Validates and extracts a strict monotonic nanosecond timestamp.
+         *
+         * Enforces:
+         * - Non-null, numeric JSON value.
+         * - Exact integer-token representation (rejects fractional values, decimal tokens, and scientific notation).
+         * - Non-negative value (>= 0).
+         * - Range bounded by 64-bit signed Long (0 .. Long.MAX_VALUE).
+         */
+        fun parseTimestampNanos(raw: Any?, lineNum: Int): Long {
+            if (raw == null) {
+                throw IllegalArgumentException("Line $lineNum: Missing or invalid timestamp 't'")
+            }
+            if (raw !is Number) {
+                throw IllegalArgumentException("Line $lineNum: Missing or invalid timestamp 't' (expected numeric integer, got ${raw::class.simpleName})")
+            }
+
+            val bigInt: java.math.BigInteger = when (raw) {
+                is Long -> java.math.BigInteger.valueOf(raw)
+                is Int, is Short, is Byte -> java.math.BigInteger.valueOf(raw.toLong())
+                is java.math.BigInteger -> raw
+                is java.math.BigDecimal -> {
+                    val exact = try {
+                        raw.toBigIntegerExact()
+                    } catch (e: ArithmeticException) {
+                        throw IllegalArgumentException("Line $lineNum: Timestamp 't' cannot be a fractional number ($raw)", e)
+                    }
+                    if (raw.scale() != 0) {
+                        throw IllegalArgumentException("Line $lineNum: Timestamp 't' must be an integer token, not decimal/exponent notation ($raw)")
+                    }
+                    exact
+                }
+                is Double, is Float -> {
+                    val bd = try {
+                        java.math.BigDecimal(raw.toString())
+                    } catch (e: Exception) {
+                        throw IllegalArgumentException("Line $lineNum: Timestamp 't' invalid floating-point value ($raw)")
+                    }
+                    val exact = try {
+                        bd.toBigIntegerExact()
+                    } catch (e: ArithmeticException) {
+                        throw IllegalArgumentException("Line $lineNum: Timestamp 't' cannot be a fractional number ($raw)", e)
+                    }
+                    throw IllegalArgumentException("Line $lineNum: Timestamp 't' must be an integer token, not floating point ($raw)")
+                }
+                else -> throw IllegalArgumentException("Line $lineNum: Unsupported numeric type for timestamp 't': ${raw::class.simpleName}")
+            }
+
+            if (bigInt < java.math.BigInteger.ZERO) {
+                throw IllegalArgumentException("Line $lineNum: Timestamp 't' cannot be negative ($bigInt)")
+            }
+            if (bigInt > java.math.BigInteger.valueOf(Long.MAX_VALUE)) {
+                throw IllegalArgumentException("Line $lineNum: Timestamp 't' ($bigInt) is outside supported Long range (max: ${Long.MAX_VALUE})")
+            }
+
+            return bigInt.toLong()
+        }
     }
 }
 
@@ -277,6 +335,18 @@ internal class SimpleJsonParser(private val src: String) {
         }
     }
 
+    /**
+     * Ensures all non-whitespace content in the source input has been consumed.
+     * Rejects any trailing non-whitespace characters, additional JSON tokens, or garbage.
+     */
+    fun ensureFullyConsumed() {
+        skipWhitespace()
+        if (idx < src.length) {
+            val trailingSnippet = if (src.length - idx > 30) src.substring(idx, idx + 30) + "..." else src.substring(idx)
+            throw IllegalArgumentException("Unexpected trailing content after JSON value at index $idx: '$trailingSnippet'")
+        }
+    }
+
     private fun skipWhitespace() {
         while (idx < src.length && src[idx].isWhitespace()) {
             idx++
@@ -291,6 +361,7 @@ internal class SimpleJsonParser(private val src: String) {
             idx++
             return map
         }
+        var closed = false
         while (idx < src.length) {
             skipWhitespace()
             val key = parseString()
@@ -303,10 +374,14 @@ internal class SimpleJsonParser(private val src: String) {
                 idx++
             } else if (idx < src.length && src[idx] == '}') {
                 idx++
+                closed = true
                 break
             } else {
                 throw IllegalArgumentException("Expected ',' or '}' at index $idx")
             }
+        }
+        if (!closed) {
+            throw IllegalArgumentException("Unclosed JSON object, expected '}'")
         }
         return map
     }
@@ -319,6 +394,7 @@ internal class SimpleJsonParser(private val src: String) {
             idx++
             return list
         }
+        var closed = false
         while (idx < src.length) {
             val value = parseValue()
             list.add(value)
@@ -327,10 +403,14 @@ internal class SimpleJsonParser(private val src: String) {
                 idx++
             } else if (idx < src.length && src[idx] == ']') {
                 idx++
+                closed = true
                 break
             } else {
                 throw IllegalArgumentException("Expected ',' or ']' at index $idx")
             }
+        }
+        if (!closed) {
+            throw IllegalArgumentException("Unclosed JSON array, expected ']'")
         }
         return list
     }
@@ -374,9 +454,13 @@ internal class SimpleJsonParser(private val src: String) {
         }
         val numStr = src.substring(start, idx)
         return if (numStr.contains('.') || numStr.contains('e') || numStr.contains('E')) {
-            numStr.toDouble()
+            java.math.BigDecimal(numStr)
         } else {
-            numStr.toLong()
+            try {
+                numStr.toLong()
+            } catch (e: NumberFormatException) {
+                java.math.BigInteger(numStr)
+            }
         }
     }
 

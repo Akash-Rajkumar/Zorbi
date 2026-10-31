@@ -10,6 +10,7 @@ import math
 import os
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
 FIXTURES_DIR = Path("fixtures")
@@ -272,6 +273,31 @@ def test_viewer_smoke():
     # Test ascii mode on single frame
     res_ascii = subprocess.run([sys.executable, str(TOOLS_DIR / "landmark_viewer.py"), str(FIXTURES_DIR / "swipe.jsonl"), "--mode", "ascii", "--frame", "0"], capture_output=True, text=True)
     assert_test("Viewer ascii mode single frame", res_ascii.returncode == 0 and "Frame 0" in res_ascii.stdout, res_ascii.stderr)
+
+
+# -----------------------------------------------------------------------------
+# Unittest TestCase Wrapper
+# -----------------------------------------------------------------------------
+class TestFixtures(unittest.TestCase):
+    def test_01_python_syntax(self):
+        test_python_syntax()
+        self.assertEqual(fail_count, 0)
+
+    def test_02_generator_determinism(self):
+        test_generator_determinism()
+        self.assertEqual(fail_count, 0)
+
+    def test_03_all_fixtures(self):
+        test_all_fixtures()
+        self.assertEqual(fail_count, 0)
+
+    def test_04_malformed_rejections(self):
+        test_malformed_rejections()
+        self.assertEqual(fail_count, 0)
+
+    def test_05_viewer_smoke(self):
+        test_viewer_smoke()
+        self.assertEqual(fail_count, 0)
 
 
 # -----------------------------------------------------------------------------
