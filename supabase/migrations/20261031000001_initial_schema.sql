@@ -47,21 +47,23 @@ create table if not exists public.gesture_events (
 );
 
 create or replace view public.v_session_stats as
-select 
+select
   device_model,
   tracker,
   perf_mode,
   count(*) as sessions,
   avg(avg_fps) as avg_fps,
   avg(p95_latency_ms) as avg_p95_latency_ms
-from public.sessions 
-where is_mock = false 
+from public.sessions
+where is_mock = false
 group by 1, 2, 3;
 
 create or replace function public.increment_profile_downloads(profile_id uuid) returns void
-language sql security definer as
-$$ 
-  update public.game_profiles 
-  set downloads = downloads + 1 
+language sql security definer
+set search_path = ''
+as
+$$
+  update public.game_profiles
+  set downloads = downloads + 1
   where id = profile_id and approved;
 $$;

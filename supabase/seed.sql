@@ -2,10 +2,12 @@
 -- ZORBI — Section 6.4 Seed Profiles & Initial Test Data
 -- Real demo profiles have approved=true, is_mock=false, author='zorbi-team'
 -- Test/mock data have is_mock=true (purged via supabase/purge_mocks.sql)
+-- Deterministic UUIDs and ON CONFLICT (id) DO NOTHING prevent duplicate entries
 -- ==============================================================================
 
--- 1. Real approved game profiles for demo ladder
+-- 1. Real approved game profiles for demo ladder (11 target columns matched)
 insert into public.game_profiles (
+  id,
   package_name,
   display_name,
   tracker,
@@ -16,8 +18,9 @@ insert into public.game_profiles (
   approved,
   downloads,
   is_mock
-) values 
+) values
 (
+  '10000000-0000-0000-0000-000000000001'::uuid,
   'com.kiloo.subwaysurf',
   'Subway Surfers',
   'HAND_SINGLE',
@@ -49,6 +52,7 @@ insert into public.game_profiles (
   false
 ),
 (
+  '10000000-0000-0000-0000-000000000002'::uuid,
   'com.halfbrick.fruitninjafree',
   'Fruit Ninja',
   'HAND_SINGLE',
@@ -71,10 +75,12 @@ insert into public.game_profiles (
   }'::jsonb,
   1,
   'zorbi-team',
+  true,
   98,
   false
 ),
 (
+  '10000000-0000-0000-0000-000000000003'::uuid,
   'com.fingersoft.hillclimb',
   'Hill Climb Racing',
   'HAND_DUAL_WHEEL',
@@ -100,10 +106,11 @@ insert into public.game_profiles (
   }'::jsonb,
   1,
   'zorbi-team',
+  true,
   76,
   false
 )
-on conflict do nothing;
+on conflict (id) do nothing;
 
 -- 2. Mock session & events for testing purge_mocks.sql (is_mock = true)
 insert into public.sessions (
@@ -120,8 +127,8 @@ insert into public.sessions (
   gestures_count,
   is_mock
 ) values (
-  '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000001'::uuid,
+  '00000000-0000-0000-0000-000000000002'::uuid,
   'Test Mock Phone',
   34,
   'com.test.mockgame',
@@ -132,4 +139,4 @@ insert into public.sessions (
   60,
   45,
   true
-) on conflict do nothing;
+) on conflict (id) do nothing;

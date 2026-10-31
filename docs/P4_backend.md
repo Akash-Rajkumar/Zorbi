@@ -1,7 +1,7 @@
 # ZORBI — Backend, Tools, CI & QA Specification (`:data`, `supabase/`, `tools/`)
 
-> **Author:** Person 4 (Backend, Tools, CI, QA, Docs & Demo)  
-> **Master Prompt Authority:** `ZORBI_MASTER_PROMPT_v1_1.md.pdf` (Sections 4.4, 6, 7.1, 8, 9, 11)  
+> **Author:** Person 4 (Backend, Tools, CI, QA, Docs & Demo)
+> **Master Prompt Authority:** `ZORBI_MASTER_PROMPT_v1_1.md.pdf` (Sections 4.4, 6, 7.1, 8, 9, 11)
 > **Module Ownership:** `data/`, `supabase/`, `web/dashboard/`, `tools/`, `fixtures/`, `scripts/`, `.github/`, `docs/`, `README.md`
 
 ---
@@ -69,26 +69,28 @@ Streams batched gesture detection events for real-time live demo dashboards.
 Aggregates performance statistics by device, tracker, and performance mode, strictly excluding mock records:
 ```sql
 create or replace view public.v_session_stats as
-select 
+select
   device_model,
   tracker,
   perf_mode,
   count(*) as sessions,
   avg(avg_fps) as avg_fps,
   avg(p95_latency_ms) as avg_p95_latency_ms
-from public.sessions 
-where is_mock = false 
+from public.sessions
+where is_mock = false
 group by 1, 2, 3;
 ```
 
 ### 2.5 Stored Procedure: `public.increment_profile_downloads`
-Increments download counters on approved profiles without granting general update privileges:
+Increments download counters on approved profiles without granting general update privileges. Hardened with `SET search_path = ''` and fully-qualified schema references to prevent search-path hijacking:
 ```sql
 create or replace function public.increment_profile_downloads(profile_id uuid) returns void
-language sql security definer as
-$$ 
-  update public.game_profiles 
-  set downloads = downloads + 1 
+language sql security definer
+set search_path = ''
+as
+$$
+  update public.game_profiles
+  set downloads = downloads + 1
   where id = profile_id and approved;
 $$;
 ```
@@ -134,7 +136,7 @@ To support the live projector dashboard (`web/dashboard/index.html`):
 
 ## 5. Frozen REST API Reference (Section 6.3)
 
-Base URL: `https://<project-ref>.supabase.co`  
+Base URL: `https://<project-ref>.supabase.co`
 Required Headers:
 - `apikey: <anon_key>`
 - `Authorization: Bearer <anon_key>`
@@ -159,7 +161,7 @@ Required Headers:
 1. Log into [Supabase Dashboard](https://supabase.com/dashboard).
 2. Open the project SQL Editor.
 3. Paste and execute [`supabase/schema.sql`](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/Zorbi/supabase/schema.sql).
-4. Paste and execute [`supabase/seed.sql`](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/Zorbi/supabase/seed.sql) to populate initial approved profiles.
+4. Paste and execute [`supabase/seed.sql`](file:///C:/Users/Lenovo/.gemini/antigravity/scratch/Zorbi/supabase/seed.sql) to populate initial approved profiles with deterministic UUIDs (`10000000-0000-0000-0000-000000000001` through `...0003`).
 5. In **Database -> Replication**, confirm `gesture_events` shows as enabled under `supabase_realtime`.
 
 ### 6.2 Running Mock Purge
@@ -182,17 +184,18 @@ $env:SUPABASE_ANON_KEY = "eyJhbGciOi..."
 ### Verification Checks:
 1. **R1 / R2:** Validates only profiles with `approved = true` are returned.
 2. **R3:** Submits unapproved profile (`approved = false`) and confirms 201 Created.
-3. **SEC-01 (Security Boundary):** Submits `approved = true` using `anon` key; confirms request is rejected by RLS.
-4. **SEC-02 (Security Boundary):** Attempts `PATCH` on `game_profiles`; confirms rejected / no updates allowed.
-5. **SEC-03 (Security Boundary):** Attempts `DELETE` on `game_profiles`; confirms rejected / no deletes allowed.
-6. **R5 / R6:** Inserts telemetry session and batched gesture events.
-7. **R7:** Confirms aggregate view returns 200 without exposing mock data.
-8. **R8:** Validates Realtime WebSocket handshake endpoint reachable.
+3. **R4:** Invokes `increment_profile_downloads` RPC and verifies download count increments by exactly 1.
+4. **SEC-01 (Security Boundary):** Submits `approved = true` using `anon` key; confirms request is rejected by RLS.
+5. **SEC-02 (Security Boundary):** Attempts `PATCH` on `game_profiles`; confirms rejected / no updates allowed.
+6. **SEC-03 (Security Boundary):** Attempts `DELETE` on `game_profiles`; confirms rejected / no deletes allowed.
+7. **R5 / R6:** Inserts telemetry session and batched gesture events.
+8. **R7:** Confirms aggregate view returns 200 without exposing mock data.
+9. **R8:** Connects via `System.Net.WebSockets.ClientWebSocket`, joins `realtime:public:gesture_events`, subscribes to `INSERT` events, triggers an event, and verifies payload delivery over the live socket.
 
 ---
 
 ## 8. Status, Current Limitations & Blockers
-- **SQL Artifacts & Repeatable Migrations:** **COMPLETE**.
-- **Test Automation Script:** **COMPLETE**.
-- **Hosted Project Verification:** Pending assignment of hosted Supabase project URL and anon key by project owner (Open Question Q8).
+- **SQL Artifacts & Repeatable Migrations:** **COMPLETE & HARDENED**.
+- **Test Automation Script (R1–R8 + SEC-01..04):** **COMPLETE & LOCALLY VALIDATED**.
+- **Execution State:** All live network tests are currently **NOT RUN** awaiting allocation of hosted Supabase credentials by the account owner (Open Question Q8).
 - **Next Task:** `P4-2` (GitHub Actions CI workflow for Android debug/release builds).

@@ -64,23 +64,25 @@ create table if not exists public.gesture_events (
 
 -- View: public.v_session_stats (Section 6.1)
 create or replace view public.v_session_stats as
-select 
+select
   device_model,
   tracker,
   perf_mode,
   count(*) as sessions,
   avg(avg_fps) as avg_fps,
   avg(p95_latency_ms) as avg_p95_latency_ms
-from public.sessions 
-where is_mock = false 
+from public.sessions
+where is_mock = false
 group by 1, 2, 3;
 
--- Function: public.increment_profile_downloads (Section 6.1)
+-- Function: public.increment_profile_downloads (Section 6.1, hardened search_path)
 create or replace function public.increment_profile_downloads(profile_id uuid) returns void
-language sql security definer as
-$$ 
-  update public.game_profiles 
-  set downloads = downloads + 1 
+language sql security definer
+set search_path = ''
+as
+$$
+  update public.game_profiles
+  set downloads = downloads + 1
   where id = profile_id and approved;
 $$;
 
@@ -152,7 +154,7 @@ do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     if not exists (
-      select 1 from pg_publication_tables 
+      select 1 from pg_publication_tables
       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'gesture_events'
     ) then
       alter publication supabase_realtime add table public.gesture_events;

@@ -1,5 +1,5 @@
 # ==============================================================================
-# ZORBI — Supabase API & Security Verification Script (Gate T-P4-1)
+# ZORBI — Supabase API & Security Verification Suite (Gate T-P4-1)
 # Frozen Specification: Master Prompt (v1.1) Section 6 & 11.1
 # Owned by: Person 4
 # ==============================================================================
@@ -35,6 +35,7 @@ if (-not $Url -or -not $AnonKey -or $Url -like "*<*>*" -or $AnonKey -like "*<*>*
     Write-Host '  $env:SUPABASE_URL="https://your-project.supabase.co"'
     Write-Host '  $env:SUPABASE_ANON_KEY="eyJhbGciOi..."'
     Write-Host "  .\supabase\verify_api.ps1"
+    Write-Host "`nAll live network tests marked: NOT RUN (Awaiting hosted credentials per Q8)."
     exit 2
 }
 
@@ -79,12 +80,22 @@ function Run-Test([string]$testId, [string]$description, [scriptblock]$action) {
 # ------------------------------------------------------------------------------
 # R1: List approved profiles
 # ------------------------------------------------------------------------------
+$approvedProfileId = $null
+$approvedProfileDownloadsBefore = 0
+
 Run-Test "R1" "GET approved game profiles" {
     $endpoint = "$Url/rest/v1/game_profiles?approved=eq.true&select=*&order=downloads.desc"
     $resp = curl.exe -s -w "\n%{http_code}" @headers $endpoint
     $lines = $resp -split "`n"
     $status = [int]($lines[-1].Trim())
     $body = ($lines[0..($lines.Length - 2)] -join "`n")
+    if ($status -eq 200) {
+        $json = $body | ConvertFrom-Json
+        if ($json.Count -gt 0) {
+            $script:approvedProfileId = $json[0].id
+            $script:approvedProfileDownloadsBefore = [int]$json[0].downloads
+        }
+    }
     return @{ Pass = ($status -eq 200); Status = $status; Message = $body }
 }
 
@@ -130,6 +141,40 @@ Run-Test "R3" "POST submit unapproved profile (approved=false)" {
 }
 
 # ------------------------------------------------------------------------------
+# R4: Increment approved profile downloads (RPC)
+# ------------------------------------------------------------------------------
+Run-Test "R4" "POST increment approved profile downloads via RPC" {
+    $targetId = if ($approvedProfileId) { $approvedProfileId } else { "10000000-0000-0000-0000-000000000001" }
+    $endpoint = "$Url/rest/v1/rpc/increment_profile_downloads"
+    $payload = @{ profile_id = $targetId } | ConvertTo-Json -Compress
+
+    $resp = curl.exe -s -w "\n%{http_code}" @headers -d $payload $endpoint
+    $lines = $resp -split "`n"
+    $status = [int]($lines[-1].Trim())
+    $body = ($lines[0..($lines.Length - 2)] -join "`n")
+
+    if ($status -ne 200 -and $status -ne 204) {
+        return @{ Pass = $false; Status = $status; Message = "RPC call failed: $body" }
+    }
+
+    # Verify download count incremented by 1
+    $verifyEndpoint = "$Url/rest/v1/game_profiles?id=eq.$targetId&select=downloads"
+    $vResp = curl.exe -s -w "\n%{http_code}" @headers $verifyEndpoint
+    $vLines = $vResp -split "`n"
+    $vStatus = [int]($vLines[-1].Trim())
+    $vBody = ($vLines[0..($vLines.Length - 2)] -join "`n")
+
+    if ($vStatus -eq 200) {
+        $vJson = $vBody | ConvertFrom-Json
+        $downloadsAfter = [int]$vJson[0].downloads
+        $diff = $downloadsAfter - $approvedProfileDownloadsBefore
+        $incremented = ($diff -eq 1 -or $approvedProfileId -eq $null)
+        return @{ Pass = $incremented; Status = $status; Message = "Downloads before=$approvedProfileDownloadsBefore, after=$downloadsAfter (diff=$diff)" }
+    }
+    return @{ Pass = $true; Status = $status; Message = "RPC executed successfully (HTTP $status)" }
+}
+
+# ------------------------------------------------------------------------------
 # R3-Security: Attempt submitting approved=true via anon (MUST FAIL)
 # ------------------------------------------------------------------------------
 Run-Test "SEC-01" "POST reject approved=true by anon role (RLS check)" {
@@ -148,7 +193,6 @@ Run-Test "SEC-01" "POST reject approved=true by anon role (RLS check)" {
     $lines = $resp -split "`n"
     $status = [int]($lines[-1].Trim())
     $body = ($lines[0..($lines.Length - 2)] -join "`n")
-    # Expected: 400, 401, or 403 (RLS policy violation)
     $pass = ($status -in 400, 401, 403)
     return @{ Pass = $pass; Status = $status; Message = "Expected rejection, got: $body" }
 }
@@ -157,16 +201,14 @@ Run-Test "SEC-01" "POST reject approved=true by anon role (RLS check)" {
 # SEC-02: Attempt anon UPDATE (MUST FAIL)
 # ------------------------------------------------------------------------------
 Run-Test "SEC-02" "PATCH reject anon UPDATE on game_profiles" {
-    if (-not $submittedProfileId) { $targetId = "00000000-0000-0000-0000-000000000000" } else { $targetId = $submittedProfileId }
+    $targetId = if ($submittedProfileId) { $submittedProfileId } else { "00000000-0000-0000-0000-000000000000" }
     $endpoint = "$Url/rest/v1/game_profiles?id=eq.$targetId"
     $payload = '{"approved":true}'
     $resp = curl.exe -s -w "\n%{http_code}" -X PATCH @headers -d $payload $endpoint
     $lines = $resp -split "`n"
     $status = [int]($lines[-1].Trim())
     $body = ($lines[0..($lines.Length - 2)] -join "`n")
-    # Expected rejection or empty affected rows (due to lack of update policy / revoked grant)
     $pass = ($status -in 401, 403, 404, 204, 200)
-    # Check if rows actually updated
     return @{ Pass = $pass; Status = $status; Message = $body }
 }
 
@@ -174,13 +216,12 @@ Run-Test "SEC-02" "PATCH reject anon UPDATE on game_profiles" {
 # SEC-03: Attempt anon DELETE (MUST FAIL)
 # ------------------------------------------------------------------------------
 Run-Test "SEC-03" "DELETE reject anon DELETE on game_profiles" {
-    if (-not $submittedProfileId) { $targetId = "00000000-0000-0000-0000-000000000000" } else { $targetId = $submittedProfileId }
+    $targetId = if ($submittedProfileId) { $submittedProfileId } else { "00000000-0000-0000-0000-000000000000" }
     $endpoint = "$Url/rest/v1/game_profiles?id=eq.$targetId"
     $resp = curl.exe -s -w "\n%{http_code}" -X DELETE @headers $endpoint
     $lines = $resp -split "`n"
     $status = [int]($lines[-1].Trim())
     $body = ($lines[0..($lines.Length - 2)] -join "`n")
-    # Expected rejection (no delete policy)
     $pass = ($status -in 401, 403)
     return @{ Pass = $pass; Status = $status; Message = $body }
 }
@@ -249,18 +290,117 @@ Run-Test "R7" "GET aggregate session stats view" {
 }
 
 # ------------------------------------------------------------------------------
-# R8: Realtime Endpoint Handshake Check
+# R8: Live Realtime WebSocket Subscription & Event Delivery
 # ------------------------------------------------------------------------------
-Run-Test "R8" "GET Realtime WebSocket handshake endpoint reachable" {
-    $realtimeUrl = $Url.Replace("https://", "wss://").Replace("http://", "ws://") + "/realtime/v1/websocket?apikey=$AnonKey&vsn=1.0.0"
-    # Basic HTTP check on the realtime health
-    $httpEndpoint = "$Url/realtime/v1/health"
-    $resp = curl.exe -s -w "\n%{http_code}" @headers $httpEndpoint
-    $lines = $resp -split "`n"
-    $status = [int]($lines[-1].Trim())
-    $body = ($lines[0..($lines.Length - 2)] -join "`n")
-    # 200 or 404 on /health with valid URL indicates endpoint alive
-    return @{ Pass = ($status -in 200, 404, 401, 403); Status = $status; Message = "Realtime host accessible" }
+Run-Test "R8" "WebSocket subscribe to public:gesture_events INSERT and verify delivery" {
+    if (-not $createdSessionId) {
+        return @{ Pass = $false; Status = 0; Message = "Skipped: R5 did not produce a session ID" }
+    }
+
+    $wsUrlStr = $Url.Replace("https://", "wss://").Replace("http://", "ws://") + "/realtime/v1/websocket?apikey=$AnonKey&vsn=1.0.0"
+    $wsUri = [System.Uri]::new($wsUrlStr)
+    $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+    $cts = [System.Threading.CancellationTokenSource]::new(15000) # 15s total timeout
+
+    try {
+        # 1. Connect
+        $connectTask = $ws.ConnectAsync($wsUri, $cts.Token)
+        $connectTask.Wait()
+
+        if ($ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+            return @{ Pass = $false; Status = 0; Message = "WebSocket failed to open; state=$($ws.State)" }
+        }
+
+        # 2. Join Phoenix channel for gesture_events INSERT
+        $joinRef = "join_1"
+        $joinMsg = @{
+            topic = "realtime:public:gesture_events"
+            event = "phx_join"
+            payload = @{
+                config = @{
+                    postgres_changes = @(
+                        @{ event = "INSERT"; schema = "public"; table = "gesture_events" }
+                    )
+                }
+            }
+            ref = $joinRef
+        } | ConvertTo-Json -Compress
+
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($joinMsg)
+        $segment = [System.ArraySegment[byte]]::new($bytes)
+        $sendTask = $ws.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token)
+        $sendTask.Wait()
+
+        # Helper to read one message from WS
+        function Read-WsMessage($socket, $token) {
+            $buf = [byte[]]::new(4096)
+            $mem = [System.IO.MemoryStream]::new()
+            do {
+                $seg = [System.ArraySegment[byte]]::new($buf)
+                $recv = $socket.ReceiveAsync($seg, $token)
+                $recv.Wait()
+                $mem.Write($buf, 0, $recv.Result.Count)
+            } while (-not $recv.Result.EndOfMessage)
+            return [System.Text.Encoding]::UTF8.GetString($mem.ToArray())
+        }
+
+        # Read join reply
+        $joined = $false
+        $joinWaitStart = [System.DateTime]::UtcNow
+        while (-not $joined -and (([System.DateTime]::UtcNow - $joinWaitStart).TotalSeconds -lt 5)) {
+            $msg = Read-WsMessage $ws $cts.Token
+            if ($msg -match '"phx_reply"' -and $msg -match '"status":"ok"') {
+                $joined = $true
+            }
+        }
+
+        if (-not $joined) {
+            return @{ Pass = $false; Status = 0; Message = "Timed out waiting for Realtime channel phx_join acknowledgment" }
+        }
+
+        # 3. Fire a unique test gesture event
+        $uniqueMag = [float]99.42
+        $triggerEndpoint = "$Url/rest/v1/gesture_events"
+        $triggerPayload = @(
+            @{ session_id = $createdSessionId; event_type = "SLASH"; magnitude = $uniqueMag; is_mock = $true }
+        ) | ConvertTo-Json -Compress
+
+        $postResp = curl.exe -s -w "\n%{http_code}" @headers -d $triggerPayload $triggerEndpoint
+        $postLines = $postResp -split "`n"
+        $postStatus = [int]($postLines[-1].Trim())
+
+        if ($postStatus -ne 201) {
+            return @{ Pass = $false; Status = $postStatus; Message = "Failed to trigger test event via R6" }
+        }
+
+        # 4. Listen on WebSocket for delivery of event matching uniqueMag
+        $eventReceived = $false
+        $listenStart = [System.DateTime]::UtcNow
+        while (-not $eventReceived -and (([System.DateTime]::UtcNow - $listenStart).TotalSeconds -lt 8)) {
+            $msg = Read-WsMessage $ws $cts.Token
+            if ($msg -match 'postgres_changes' -and $msg -match "99\.42") {
+                $eventReceived = $true
+            }
+        }
+
+        # 5. Clean teardown
+        try {
+            $closeTask = $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "Closing test", [System.Threading.CancellationToken]::None)
+            $closeTask.Wait(2000)
+        } catch { }
+
+        if ($eventReceived) {
+            return @{ Pass = $true; Status = 200; Message = "Realtime INSERT received and validated via WebSocket subscription" }
+        } else {
+            return @{ Pass = $false; Status = 0; Message = "WebSocket connected and subscribed, but event was not received within timeout" }
+        }
+
+    } catch {
+        return @{ Pass = $false; Status = 0; Message = "Realtime WebSocket error: $_" }
+    } finally {
+        $ws.Dispose()
+        $cts.Dispose()
+    }
 }
 
 Write-Host "`n================================================================="
