@@ -419,7 +419,7 @@ class SupabaseHttpClientTest {
             "select" to "*,targets->x",
             "display_name" to "eq.Subway Surfers"
         )
-        val url = client.buildUrl("rest/v1/game_profiles", queryParams)
+        val url = client.buildUrl("rest/v1/game_profiles", queryParams)!!
 
         assertThat(url).isNotNull()
         // Query parameters should be properly encoded in URL string
