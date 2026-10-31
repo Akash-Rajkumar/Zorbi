@@ -34,6 +34,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Run Kotlin JVM Unit Tests (:fakes)
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.java.home=${{ env.JAVA_HOME }}"
+        run: |
+          ./gradlew :fakes:testDebugUnitTest \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            --stacktrace
+
       - name: Build Debug and Release APKs
         env:
           GRADLE_OPTS: "-Dorg.gradle.java.home=${{ env.JAVA_HOME }}"
