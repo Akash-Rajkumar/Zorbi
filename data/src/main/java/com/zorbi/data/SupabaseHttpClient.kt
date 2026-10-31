@@ -83,11 +83,13 @@ class SupabaseHttpClient(
     baseClient: OkHttpClient = defaultOkHttpClient(),
     private val mainThreadChecker: () -> Boolean = { isAndroidMainThread() }
 ) {
-    val client: OkHttpClient = baseClient.newBuilder()
-        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .addInterceptor(SupabaseAuthInterceptor(config))
-        .build()
+    val client: OkHttpClient = run {
+        val builder = baseClient.newBuilder()
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        builder.interceptors().add(0, SupabaseAuthInterceptor(config))
+        builder.build()
+    }
 
     /**
      * Constructs a validated [HttpUrl] targeting this Supabase instance.
