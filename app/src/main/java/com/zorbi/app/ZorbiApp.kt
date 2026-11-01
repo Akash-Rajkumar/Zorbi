@@ -12,9 +12,28 @@ class ZorbiApp : Application() {
     lateinit var appGraph: AppGraph
         private set
 
+    /**
+     * Resolves the AppGraph instance.
+     * In production, returns the wired RealAppGraph initialized in onCreate().
+     * If not initialized, cleanly falls back to FakeAppGraph for testing.
+     */
+    fun getGraph(): AppGraph {
+        if (::appGraph.isInitialized) {
+            return appGraph
+        }
+        return try {
+            val fakeClass = Class.forName("com.zorbi.fakes.FakeAppGraph")
+            fakeClass.getDeclaredConstructor().newInstance() as AppGraph
+        } catch (e: Exception) {
+            throw IllegalStateException("AppGraph not initialized and FakeAppGraph unavailable", e)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // Phase 4: Wire live RealAppGraph containing real input injector and engine controller
+        appGraph = RealAppGraph.createDefault(this)
     }
 
     private fun createNotificationChannel() {
@@ -31,4 +50,3 @@ class ZorbiApp : Application() {
         }
     }
 }
-
