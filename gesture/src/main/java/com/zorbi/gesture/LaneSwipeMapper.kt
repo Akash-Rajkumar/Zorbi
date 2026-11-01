@@ -26,7 +26,10 @@ data class TouchSwipe(
  */
 object LaneSwipeMapper {
     const val DEFAULT_SWIPE_DURATION_MS: Long = 100L
+    const val OPTIMIZED_SWIPE_DURATION_MS: Long = 60L
     const val DEFAULT_OFFSET: Float = 0.3f
+
+    var activeSwipeDurationMs: Long = DEFAULT_SWIPE_DURATION_MS
 
     fun map(swipe: Swipe, profile: GameProfile): TouchSwipe {
         val centerTarget = profile.targets["center"]
@@ -58,8 +61,7 @@ object LaneSwipeMapper {
         return TouchSwipe(
             from = center,
             to = destination,
-            durationMs = DEFAULT_SWIPE_DURATION_MS
+            durationMs = activeSwipeDurationMs
         )
     }
 }
-

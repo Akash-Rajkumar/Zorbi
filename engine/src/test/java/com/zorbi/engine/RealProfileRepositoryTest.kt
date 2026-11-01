@@ -13,7 +13,10 @@ import com.zorbi.core.TrackerId
 import com.zorbi.fakes.p1.FakeCalibrationRepository
 import com.zorbi.fakes.p1.FakeTracker
 import com.zorbi.fakes.p1.FakeTrackerRegistry
+import com.zorbi.core.Dir
+import com.zorbi.core.Swipe
 import com.zorbi.fakes.p2.FakeInputInjector
+import com.zorbi.gesture.LaneSwipeMapper
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -93,6 +96,52 @@ class RealProfileRepositoryTest {
         assertThat(profile.targets).containsKey("right")
         assertThat(profile.targets).containsKey("center")
         assertThat(profile.params.swipeMinSpeed).isGreaterThan(0f)
+
+        // REGRESSION VERIFICATION: Pure horizontal and vertical swipe targets
+        val center = profile.targets["center"]
+        val left = profile.targets["left"]
+        val right = profile.targets["right"]
+        val up = profile.targets["up"]
+        val down = profile.targets["down"]
+
+        assertThat(center).isEqualTo(TargetPoint(0.50f, 0.50f))
+        assertThat(left).isEqualTo(TargetPoint(0.20f, 0.50f))
+        assertThat(right).isEqualTo(TargetPoint(0.80f, 0.50f))
+        assertThat(up).isEqualTo(TargetPoint(0.50f, 0.20f))
+        assertThat(down).isEqualTo(TargetPoint(0.50f, 0.80f))
+
+        // Horizontal delta Y must be strictly 0 (no vertical skew causing down-roll / duck)
+        assertThat(left!!.y).isEqualTo(center!!.y)
+        assertThat(right!!.y).isEqualTo(center.y)
+
+        // Vertical delta X must be strictly 0
+        assertThat(up!!.x).isEqualTo(center.x)
+        assertThat(down!!.x).isEqualTo(center.x)
+
+        // Verify LaneSwipeMapper mapping on the physical profile asset
+        val swipeLeft = Swipe(tsNanos = 1000L, dir = Dir.LEFT, speed = 2.0f)
+        val touchLeft = LaneSwipeMapper.map(swipeLeft, profile)
+        assertThat(touchLeft.from).isEqualTo(Pt(0.50f, 0.50f))
+        assertThat(touchLeft.to).isEqualTo(Pt(0.20f, 0.50f))
+        assertThat(touchLeft.from.y).isEqualTo(touchLeft.to.y)
+
+        val swipeRight = Swipe(tsNanos = 1000L, dir = Dir.RIGHT, speed = 2.0f)
+        val touchRight = LaneSwipeMapper.map(swipeRight, profile)
+        assertThat(touchRight.from).isEqualTo(Pt(0.50f, 0.50f))
+        assertThat(touchRight.to).isEqualTo(Pt(0.80f, 0.50f))
+        assertThat(touchRight.from.y).isEqualTo(touchRight.to.y)
+
+        val swipeUp = Swipe(tsNanos = 1000L, dir = Dir.UP, speed = 2.0f)
+        val touchUp = LaneSwipeMapper.map(swipeUp, profile)
+        assertThat(touchUp.from).isEqualTo(Pt(0.50f, 0.50f))
+        assertThat(touchUp.to).isEqualTo(Pt(0.50f, 0.20f))
+        assertThat(touchUp.from.x).isEqualTo(touchUp.to.x)
+
+        val swipeDown = Swipe(tsNanos = 1000L, dir = Dir.DOWN, speed = 2.0f)
+        val touchDown = LaneSwipeMapper.map(swipeDown, profile)
+        assertThat(touchDown.from).isEqualTo(Pt(0.50f, 0.50f))
+        assertThat(touchDown.to).isEqualTo(Pt(0.50f, 0.80f))
+        assertThat(touchDown.from.x).isEqualTo(touchDown.to.x)
     }
 
     @Test

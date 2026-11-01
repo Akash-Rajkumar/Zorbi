@@ -26,6 +26,7 @@ android {
 dependencies {
     implementation(project(":core"))
     implementation(project(":gesture"))
+    implementation(project(":calib"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)

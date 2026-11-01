@@ -1,5 +1,6 @@
 package com.zorbi.engine
 
+import com.zorbi.calib.fist.FistDetector
 import com.zorbi.core.Calibration
 import com.zorbi.core.CalibrationRepository
 import com.zorbi.core.Dir
@@ -77,6 +78,7 @@ class RealEngineController(
     private val interpretersByTracker: Map<TrackerId, GestureInterpreter> = emptyMap(),
     private val customInterpreterProvider: ((GameProfile) -> GestureInterpreter?)? = null,
     private val filter: FrameFilter = PassthroughFilter,
+    private val fistDetector: FistDetector? = null,
     private val telemetrySink: TelemetrySink? = null,
     private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 ) : EngineController {
@@ -92,7 +94,8 @@ class RealEngineController(
         interpreters: Map<TrackerId, GestureInterpreter>,
         filter: FrameFilter = PassthroughFilter,
         telemetrySink: TelemetrySink? = null,
-        coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
+        fistDetector: FistDetector? = null
     ) : this(
         trackerRegistry = trackerRegistry,
         profileRepository = profileRepository,
@@ -102,6 +105,7 @@ class RealEngineController(
         interpretersByTracker = interpreters,
         customInterpreterProvider = null,
         filter = filter,
+        fistDetector = fistDetector,
         telemetrySink = telemetrySink,
         coroutineScope = coroutineScope
     )
@@ -156,6 +160,7 @@ class RealEngineController(
 
         filter.configure(profile)
         filter.reset()
+        fistDetector?.reset()
 
         try {
             tracker.start(perf)
@@ -208,6 +213,7 @@ class RealEngineController(
 
         filter.configure(profile)
         filter.reset()
+        fistDetector?.reset()
 
         try {
             tracker.start(perf)
@@ -235,8 +241,12 @@ class RealEngineController(
                         EngineState.RUNNING -> {
                             processFrame(rawFrame, tracker, profile, cal, interpreter)
                         }
-                        EngineState.PAUSED, EngineState.CALIBRATING -> {
+                        EngineState.PAUSED -> {
                             processPausedFrame(rawFrame, tracker)
+                        }
+                        EngineState.CALIBRATING -> {
+                            val filteredFrame = filter.filter(rawFrame)
+                            emitHud(filteredFrame, tracker, lastGesture = null)
                         }
                         EngineState.IDLE, EngineState.ERROR -> {
                             // IDLE or ERROR: drop frame
@@ -263,12 +273,19 @@ class RealEngineController(
     ) {
         val filteredFrame = filter.filter(rawFrame)
 
-        val events = try {
-            interpreter.onFrame(filteredFrame, profile, cal)
-        } catch (e: Throwable) {
+        val fistEvents = try {
+            fistDetector?.onFrame(filteredFrame) ?: emptyList()
+        } catch (_: Throwable) {
             emptyList()
         }
 
+        val interpreterEvents = try {
+            interpreter.onFrame(filteredFrame, profile, cal)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+
+        val events = fistEvents + interpreterEvents
         var lastEvent: GestureEvent? = null
 
         for (event in events) {
@@ -277,6 +294,7 @@ class RealEngineController(
                 is PauseToggle -> {
                     if (_state.value == EngineState.RUNNING) {
                         pause()
+                        break
                     } else if (_state.value == EngineState.PAUSED) {
                         resume()
                     }
@@ -284,6 +302,12 @@ class RealEngineController(
                 is Swipe -> {
                     if (profile.mapping == MappingType.LANE_SWIPE) {
                         val touchSwipe = LaneSwipeMapper.map(event, profile)
+                        try {
+                            android.util.Log.i("Zorbi/Diagnostic", "Engine: Received SWIPE ${event.dir} (speed=${event.speed}), mapped to (${touchSwipe.from} -> ${touchSwipe.to})")
+                            android.util.Log.i("Zorbi/Engine", "Gesture detected: SWIPE ${event.dir} (speed=${event.speed}) -> mapped to (${touchSwipe.from} -> ${touchSwipe.to})")
+                        } catch (_: Throwable) {
+                            // Ignored in headless JVM unit tests
+                        }
                         inputInjector.swipe(touchSwipe.from, touchSwipe.to, touchSwipe.durationMs)
                         telemetrySink?.gestureEvent(
                             sessionId = activeSessionId,
@@ -343,9 +367,25 @@ class RealEngineController(
     }
 
     private fun processPausedFrame(rawFrame: TrackerFrame, tracker: Tracker) {
-        // In paused state: do not route to interpreter or input injector.
-        // Maintain non-blocking HUD feed.
-        emitHud(rawFrame, tracker, lastGesture = null)
+        val filteredFrame = filter.filter(rawFrame)
+        val fistEvents = try {
+            fistDetector?.onFrame(filteredFrame) ?: emptyList()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+
+        var lastEvent: GestureEvent? = null
+        for (event in fistEvents) {
+            if (event is PauseToggle) {
+                lastEvent = event
+                if (_state.value == EngineState.PAUSED) {
+                    resume()
+                    break
+                }
+            }
+        }
+
+        emitHud(filteredFrame, tracker, lastGesture = lastEvent)
     }
 
     private fun emitHud(
@@ -391,12 +431,15 @@ class RealEngineController(
             _state.value = EngineState.PAUSED
             safeReleaseTouch()
             filter.reset()
+            fistDetector?.reset()
         }
     }
 
     override fun resume() {
         if (_state.value == EngineState.PAUSED) {
             resetInterpreter(activeInterpreter)
+            filter.reset()
+            fistDetector?.reset()
             _state.value = EngineState.RUNNING
         }
     }
@@ -413,6 +456,7 @@ class RealEngineController(
 
         resetInterpreter(activeInterpreter)
         filter.reset()
+        fistDetector?.reset()
         activeTracker = null
         activeProfile = null
         activeInterpreter = null
@@ -470,4 +514,3 @@ class RealEngineController(
         )
     }
 }
-

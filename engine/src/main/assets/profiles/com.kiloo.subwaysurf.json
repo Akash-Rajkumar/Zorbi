@@ -6,14 +6,16 @@
   "tracker": "HAND_SINGLE",
   "mapping": "LANE_SWIPE",
   "targets": {
-    "left": { "x": 0.20, "y": 0.80 },
-    "right": { "x": 0.80, "y": 0.80 },
-    "center": { "x": 0.50, "y": 0.50 }
+    "left": { "x": 0.20, "y": 0.50 },
+    "right": { "x": 0.80, "y": 0.50 },
+    "center": { "x": 0.50, "y": 0.50 },
+    "up": { "x": 0.50, "y": 0.20 },
+    "down": { "x": 0.50, "y": 0.80 }
   },
   "params": {
     "deadzoneDeg": 8.0,
     "cooldownMs": 350,
-    "swipeMinSpeed": 1.2,
+    "swipeMinSpeed": 0.18,
     "slashMinLength": 0.15,
     "smoothing": {
       "minCutoff": 1.0,
@@ -21,4 +23,3 @@
     }
   }
 }
-

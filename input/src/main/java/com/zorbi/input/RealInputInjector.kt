@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
  * to current display pixel coordinates.
  */
 class RealInputInjector(
+    var onDispatchResult: ((Boolean, String) -> Unit)? = null,
     private val serviceProvider: () -> ZorbiAccessibilityService? = { ZorbiAccessibilityService.instance },
     private val displayBoundsProvider: () -> Pair<Int, Int> = {
         val service = ZorbiAccessibilityService.instance
@@ -104,11 +105,19 @@ class RealInputInjector(
 
             service.dispatch(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    Log.v(TAG, "swipe completed from $fromPoint to $toPoint in ${clampedDuration}ms")
+                    Log.i(TAG, "SUCCESS: swipe completed from $fromPoint to $toPoint in ${clampedDuration}ms")
+                    try {
+                        Log.i("Zorbi/Diagnostic", "AccessibilityService: SUCCESS swipe completed in ${clampedDuration}ms")
+                        onDispatchResult?.invoke(true, "SUCCESS (${clampedDuration}ms)")
+                    } catch (_: Throwable) {}
                 }
 
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     Log.w(TAG, "swipe cancelled from $fromPoint to $toPoint")
+                    try {
+                        Log.w("Zorbi/Diagnostic", "AccessibilityService: CANCELLED swipe from $fromPoint to $toPoint")
+                        onDispatchResult?.invoke(false, "CANCELLED")
+                    } catch (_: Throwable) {}
                 }
             })
         }

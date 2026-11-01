@@ -1,5 +1,7 @@
 package com.zorbi.engine
 
+import com.zorbi.calib.fist.FistDetector
+
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.zorbi.core.Calibration
@@ -132,7 +134,8 @@ class RealEngineControllerTest {
     private fun createController(
         interpreters: Map<TrackerId, com.zorbi.core.GestureInterpreter> = emptyMap(),
         filter: FrameFilter = PassthroughFilter,
-        customRegistry: FakeTrackerRegistry = trackerRegistry
+        customRegistry: FakeTrackerRegistry = trackerRegistry,
+        fistDetector: FistDetector? = null
     ): RealEngineController {
         return RealEngineController(
             trackerRegistry = customRegistry,
@@ -142,7 +145,8 @@ class RealEngineControllerTest {
             interpreters = interpreters,
             filter = filter,
             telemetrySink = telemetrySink,
-            coroutineScope = testScope
+            coroutineScope = testScope,
+            fistDetector = fistDetector
         )
     }
 
@@ -804,5 +808,143 @@ class RealEngineControllerTest {
         defaultController.stop()
         assertThat(fakePoseTracker.isStarted).isFalse()
     }
-}
 
+    private fun createClosedFist(score: Float = 0.95f): Hand {
+        val lms = ArrayList<Pt>(21)
+        lms.add(Pt(0.50f, 0.70f, 0.0f)) // 0: wrist
+        // Thumb
+        lms.add(Pt(0.44f, 0.65f, 0.01f))
+        lms.add(Pt(0.42f, 0.58f, 0.03f))
+        lms.add(Pt(0.45f, 0.52f, 0.04f))
+        lms.add(Pt(0.48f, 0.48f, 0.04f))
+        // Index
+        lms.add(Pt(0.42f, 0.50f, 0.01f))
+        lms.add(Pt(0.41f, 0.42f, 0.03f))
+        lms.add(Pt(0.43f, 0.46f, 0.01f))
+        lms.add(Pt(0.44f, 0.50f, 0.00f))
+        // Middle
+        lms.add(Pt(0.50f, 0.48f, 0.00f))
+        lms.add(Pt(0.50f, 0.40f, 0.02f))
+        lms.add(Pt(0.51f, 0.44f, 0.01f))
+        lms.add(Pt(0.51f, 0.48f, 0.00f))
+        // Ring
+        lms.add(Pt(0.58f, 0.50f, -0.01f))
+        lms.add(Pt(0.58f, 0.42f, 0.01f))
+        lms.add(Pt(0.57f, 0.46f, 0.00f))
+        lms.add(Pt(0.57f, 0.50f, -0.01f))
+        // Pinky
+        lms.add(Pt(0.65f, 0.54f, -0.02f))
+        lms.add(Pt(0.65f, 0.46f, 0.00f))
+        lms.add(Pt(0.64f, 0.50f, -0.01f))
+        lms.add(Pt(0.63f, 0.54f, -0.02f))
+        return Hand(Side.RIGHT, score, lms)
+    }
+
+    private fun createOpenHand(score: Float = 0.95f): Hand {
+        val lms = ArrayList<Pt>(21)
+        lms.add(Pt(0.50f, 0.70f, 0.0f))
+        // Thumb
+        lms.add(Pt(0.42f, 0.65f, 0.01f))
+        lms.add(Pt(0.36f, 0.58f, 0.02f))
+        lms.add(Pt(0.30f, 0.52f, 0.02f))
+        lms.add(Pt(0.24f, 0.46f, 0.03f))
+        // Index
+        lms.add(Pt(0.42f, 0.50f, 0.01f))
+        lms.add(Pt(0.41f, 0.38f, 0.01f))
+        lms.add(Pt(0.40f, 0.28f, 0.01f))
+        lms.add(Pt(0.40f, 0.18f, 0.01f))
+        // Middle
+        lms.add(Pt(0.50f, 0.48f, 0.00f))
+        lms.add(Pt(0.50f, 0.35f, 0.00f))
+        lms.add(Pt(0.50f, 0.24f, 0.00f))
+        lms.add(Pt(0.50f, 0.14f, 0.00f))
+        // Ring
+        lms.add(Pt(0.58f, 0.50f, -0.01f))
+        lms.add(Pt(0.59f, 0.38f, -0.01f))
+        lms.add(Pt(0.60f, 0.28f, -0.01f))
+        lms.add(Pt(0.60f, 0.19f, -0.01f))
+        // Pinky
+        lms.add(Pt(0.65f, 0.54f, -0.02f))
+        lms.add(Pt(0.67f, 0.44f, -0.02f))
+        lms.add(Pt(0.68f, 0.36f, -0.02f))
+        lms.add(Pt(0.69f, 0.28f, -0.02f))
+        return Hand(Side.RIGHT, score, lms)
+    }
+
+    @Test
+    fun test23_fistHold_1Second_pausesRunningEngine_releasesTouch() = runTest {
+        val fistDetector = FistDetector(holdDurationNanos = 1_000_000_000L)
+        val testController = createController(fistDetector = fistDetector)
+        profileRepo.saveLocal(subwayProfile)
+        testController.start(subwayProfile.packageName, PerfMode.BALANCED)
+        assertThat(testController.state.value).isEqualTo(EngineState.RUNNING)
+
+        // Simulate touch active
+        inputInjector.holdAt(Pt(0.5f, 0.5f))
+        inputInjector.recordedActions.clear()
+
+        // Stream 35 frames at 33ms intervals = 1155ms (> 1000ms, gap 33ms < 350ms)
+        val fist = createClosedFist()
+        for (i in 0..35) {
+            val ts = 1_000_000_000L + i * 33_333_334L
+            fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = ts, hands = listOf(fist)))
+        }
+
+        assertThat(testController.state.value).isEqualTo(EngineState.PAUSED)
+        assertThat(inputInjector.recordedActions).contains("release")
+
+        testController.stop()
+    }
+
+    @Test
+    fun test24_fistHold_secondFistHold_resumesPausedEngine() = runTest {
+        val fistDetector = FistDetector(holdDurationNanos = 1_000_000_000L)
+        val testController = createController(fistDetector = fistDetector)
+        profileRepo.saveLocal(subwayProfile)
+        testController.start(subwayProfile.packageName, PerfMode.BALANCED)
+
+        // First hold triggers pause
+        val fist = createClosedFist()
+        for (i in 0..35) {
+            val ts = 1_000_000_000L + i * 33_333_334L
+            fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = ts, hands = listOf(fist)))
+        }
+        assertThat(testController.state.value).isEqualTo(EngineState.PAUSED)
+
+        // Open hand to clear triggered fist state
+        val openHand = createOpenHand()
+        fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = 3_000_000_000L, hands = listOf(openHand)))
+        assertThat(testController.state.value).isEqualTo(EngineState.PAUSED)
+
+        // Second fist hold triggers resume
+        for (i in 0..35) {
+            val ts = 4_000_000_000L + i * 33_333_334L
+            fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = ts, hands = listOf(fist)))
+        }
+        assertThat(testController.state.value).isEqualTo(EngineState.RUNNING)
+
+        testController.stop()
+    }
+
+    @Test
+    fun test25_fistDetector_trackingLoss_resetsFistProgress() = runTest {
+        val fistDetector = FistDetector(
+            holdDurationNanos = 1_000_000_000L,
+            maxTrackingGapNanos = 350_000_000L
+        )
+        val testController = createController(fistDetector = fistDetector)
+        profileRepo.saveLocal(subwayProfile)
+        testController.start(subwayProfile.packageName, PerfMode.BALANCED)
+
+        // Fist starts at t = 0
+        fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = 0L, hands = listOf(createClosedFist())))
+        // Gap > 350ms (gap of 500ms)
+        fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = 500_000_000L, hands = listOf(createClosedFist())))
+        // Because of gap, fistStartNanos reset to 500ms
+        // At 1100ms, only 600ms elapsed since reset
+        fakeHandSingleTracker.emitFrame(HandsFrame(tsNanos = 1_100_000_000L, hands = listOf(createClosedFist())))
+        assertThat(testController.state.value).isEqualTo(EngineState.RUNNING)
+
+        testController.stop()
+    }
+}

@@ -104,32 +104,62 @@ class HandSingleTracker(
         currentPerfMode = perf
         val sessionId = sessionCounter.incrementAndGet()
         statsCollector.reset()
+        pendingSubmissions.values.forEach { it.bitmap?.recycle() }
         pendingSubmissions.clear()
         lastSubmittedTimestampMs = 0L
         nextAllowedArrivalMs = 0L
 
-        // 1. Initialize MediaPipe HandLandmarker for LIVE_STREAM with strictly 1 hand
-        val baseOptions = BaseOptions.builder()
-            .setModelAssetPath(modelAssetPath)
-            .setDelegate(Delegate.CPU)
-            .build()
+        // 1. Initialize MediaPipe HandLandmarker for LIVE_STREAM with strictly 1 hand (GPU delegate with CPU fallback)
+        var landmarkerInstance: HandLandmarker? = null
+        try {
+            val gpuBaseOptions = BaseOptions.builder()
+                .setModelAssetPath(modelAssetPath)
+                .setDelegate(Delegate.GPU)
+                .build()
 
-        val options = HandLandmarker.HandLandmarkerOptions.builder()
-            .setBaseOptions(baseOptions)
-            .setRunningMode(RunningMode.LIVE_STREAM)
-            .setNumHands(1)
-            .setMinHandDetectionConfidence(0.5f)
-            .setMinHandPresenceConfidence(0.5f)
-            .setMinTrackingConfidence(0.5f)
-            .setResultListener { result, _ ->
-                handleResult(result, sessionId)
-            }
-            .setErrorListener { error ->
-                Log.e(TAG, "MediaPipe LIVE_STREAM error in session $sessionId: ${error.message}", error)
-            }
-            .build()
+            val gpuOptions = HandLandmarker.HandLandmarkerOptions.builder()
+                .setBaseOptions(gpuBaseOptions)
+                .setRunningMode(RunningMode.LIVE_STREAM)
+                .setNumHands(1)
+                .setMinHandDetectionConfidence(0.5f)
+                .setMinHandPresenceConfidence(0.5f)
+                .setMinTrackingConfidence(0.5f)
+                .setResultListener { result, _ ->
+                    handleResult(result, sessionId)
+                }
+                .setErrorListener { error ->
+                    Log.e(TAG, "MediaPipe LIVE_STREAM error in session $sessionId: ${error.message}", error)
+                }
+                .build()
 
-        handLandmarker = HandLandmarker.createFromOptions(context, options)
+            landmarkerInstance = HandLandmarker.createFromOptions(context, gpuOptions)
+            Log.i(TAG, "Initialized MediaPipe HandLandmarker with Delegate.GPU")
+        } catch (e: Throwable) {
+            Log.w(TAG, "GPU delegate initialization failed or unavailable; falling back to Delegate.CPU: ${e.message}")
+            val cpuBaseOptions = BaseOptions.builder()
+                .setModelAssetPath(modelAssetPath)
+                .setDelegate(Delegate.CPU)
+                .build()
+
+            val cpuOptions = HandLandmarker.HandLandmarkerOptions.builder()
+                .setBaseOptions(cpuBaseOptions)
+                .setRunningMode(RunningMode.LIVE_STREAM)
+                .setNumHands(1)
+                .setMinHandDetectionConfidence(0.5f)
+                .setMinHandPresenceConfidence(0.5f)
+                .setMinTrackingConfidence(0.5f)
+                .setResultListener { result, _ ->
+                    handleResult(result, sessionId)
+                }
+                .setErrorListener { error ->
+                    Log.e(TAG, "MediaPipe LIVE_STREAM error in session $sessionId: ${error.message}", error)
+                }
+                .build()
+
+            landmarkerInstance = HandLandmarker.createFromOptions(context, cpuOptions)
+            Log.i(TAG, "Initialized MediaPipe HandLandmarker with Delegate.CPU")
+        }
+        handLandmarker = landmarkerInstance
 
         // 2. Configure CameraX resolution & throttling per PerfMode
         val executor = Executors.newSingleThreadExecutor()
@@ -260,7 +290,9 @@ class HandSingleTracker(
             // Upright bitmap rotated before feeding to MediaPipe to avoid internal calculator skew
             val rotatedBitmap = if (rotationDegrees != 0) {
                 val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-                android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                val rotated = android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                rawBitmap.recycle()
+                rotated
             } else {
                 rawBitmap
             }
@@ -278,7 +310,7 @@ class HandSingleTracker(
                 ts
             }
 
-            pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId)
+            pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId, rotatedBitmap)
             landmarker.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during frame analysis in session $sessionId", e)
@@ -291,6 +323,7 @@ class HandSingleTracker(
     private fun handleResult(result: HandLandmarkerResult, sessionId: Long) {
         val timestampMs = result.timestampMs()
         val submission = pendingSubmissions.remove(timestampMs) ?: return
+        submission.bitmap?.recycle()
         val nowNanos = SystemClock.elapsedRealtimeNanos()
 
         if (!isRunning || sessionCounter.get() != sessionId || submission.sessionId != sessionId) {
@@ -347,7 +380,11 @@ class HandSingleTracker(
         }
     }
 
-    private data class FrameSubmission(val arrivalNanos: Long, val sessionId: Long)
+    private data class FrameSubmission(
+        val arrivalNanos: Long,
+        val sessionId: Long,
+        val bitmap: android.graphics.Bitmap? = null
+    )
 
     /**
      * Dedicated [LifecycleOwner] managing CameraX binding when no external [LifecycleOwner]

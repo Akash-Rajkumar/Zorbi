@@ -274,5 +274,88 @@ class SwipeGestureInterpreterTest {
         assertThat(swipeAfterReset).hasSize(1)
         assertThat((swipeAfterReset[0] as Swipe).dir).isEqualTo(Dir.RIGHT)
     }
+
+    @Test
+    fun test12_subwaySurfersProfileBoundaryValidLeftSwipe() {
+        val subwayProfile = profile.copy(
+            packageName = "com.kiloo.subwaysurf",
+            params = ProfileParams(cooldownMs = 350L, swipeMinSpeed = 0.18f)
+        )
+        val f1 = createHandFrame(tsNanos = 0L, x = 0.50f, y = 0.50f)
+        assertThat(interpreter.onFrame(f1, subwayProfile, calibration)).isEmpty()
+
+        val f2 = createHandFrame(tsNanos = 200_000_000L, x = 0.46f, y = 0.50f)
+        val events = interpreter.onFrame(f2, subwayProfile, calibration)
+        assertThat(events).hasSize(1)
+        val swipe = events[0] as Swipe
+        assertThat(swipe.dir).isEqualTo(Dir.LEFT)
+        assertThat(swipe.speed).isAtLeast(0.18f)
+    }
+
+    @Test
+    fun test13_subwaySurfersProfileBoundaryDistanceRejection() {
+        val subwayProfile = profile.copy(
+            packageName = "com.kiloo.subwaysurf",
+            params = ProfileParams(cooldownMs = 350L, swipeMinSpeed = 0.18f)
+        )
+        val f1 = createHandFrame(tsNanos = 0L, x = 0.50f, y = 0.50f)
+        interpreter.onFrame(f1, subwayProfile, calibration)
+
+        val f2 = createHandFrame(tsNanos = 100_000_000L, x = 0.47f, y = 0.50f)
+        val events = interpreter.onFrame(f2, subwayProfile, calibration)
+        assertThat(events).isEmpty()
+    }
+
+    @Test
+    fun test14_subwaySurfersProfileBoundarySpeedRejection() {
+        val subwayProfile = profile.copy(
+            packageName = "com.kiloo.subwaysurf",
+            params = ProfileParams(cooldownMs = 350L, swipeMinSpeed = 0.18f)
+        )
+        val f1 = createHandFrame(tsNanos = 0L, x = 0.50f, y = 0.50f)
+        interpreter.onFrame(f1, subwayProfile, calibration)
+
+        val f2 = createHandFrame(tsNanos = 280_000_000L, x = 0.46f, y = 0.50f)
+        val events = interpreter.onFrame(f2, subwayProfile, calibration)
+        assertThat(events).isEmpty()
+    }
+
+    @Test
+    fun test15_stationaryIdleHandNoiseRejection() {
+        val subwayProfile = profile.copy(
+            packageName = "com.kiloo.subwaysurf",
+            params = ProfileParams(cooldownMs = 350L, swipeMinSpeed = 0.18f)
+        )
+        val basePos = 0.50f
+        val jitterOffsets = listOf(0.001f, -0.002f, 0.003f, -0.001f, 0.004f, -0.003f, 0.000f, 0.002f)
+        for (i in 0 until 60) {
+            val ts = i * 66_666_666L
+            val jitterX = basePos + jitterOffsets[i % jitterOffsets.size]
+            val jitterY = basePos + jitterOffsets[(i + 3) % jitterOffsets.size]
+            val frame = createHandFrame(tsNanos = ts, x = jitterX, y = jitterY)
+            val events = interpreter.onFrame(frame, subwayProfile, calibration)
+            assertThat(events).isEmpty()
+        }
+    }
+
+    @Test
+    fun test16_subwaySurfers300msWindowCapturesDisplacementAt15Fps() {
+        val subwayProfile = profile.copy(
+            packageName = "com.kiloo.subwaysurf",
+            params = ProfileParams(cooldownMs = 350L, swipeMinSpeed = 0.18f)
+        )
+        var events = emptyList<com.zorbi.core.GestureEvent>()
+        for (i in 0..3) {
+            val ts = i * 66_666_666L
+            val x = 0.50f + (i * 0.0167f)
+            val frame = createHandFrame(tsNanos = ts, x = x, y = 0.50f)
+            val currentEvents = interpreter.onFrame(frame, subwayProfile, calibration)
+            if (currentEvents.isNotEmpty()) {
+                events = currentEvents
+            }
+        }
+        assertThat(events).hasSize(1)
+        assertThat((events[0] as Swipe).dir).isEqualTo(Dir.RIGHT)
+    }
 }
 
