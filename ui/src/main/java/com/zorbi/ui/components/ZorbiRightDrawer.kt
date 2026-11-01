@@ -157,6 +157,8 @@ fun ZorbiRightDrawer(
         mutableStateListOf(
             DrawerGame("Subway Surfers", "com.kiloo.subwaysurf", "Target 60 FPS (Verified)", "PORTRAIT", true, true),
             DrawerGame("Hill Climb Racing", "com.fingersoft.hillclimb", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
+            DrawerGame("Paper.io", "io.voodoo.paper2", "Target 60 FPS (Verified)", "PORTRAIT", true, false),
+            DrawerGame("Beach Buggy Racing", "com.vectorunit.purple.googleplay", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
             DrawerGame("Fruit Ninja", "com.halfbrick.fruitninja", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
             DrawerGame("Minecraft", "com.mojang.minecraftpe", "Target 60 FPS (Simulated)", "LANDSCAPE", false, false)
         )
