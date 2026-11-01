@@ -1,7 +1,8 @@
 package com.zorbi.ui.navigation
 
-// FROZEN Navigation Routes per Section 5.4
+// FROZEN Navigation Routes per Section 5.4 + Splash Screen
 object NavRoutes {
+    const val SPLASH = "splash"
     const val HOME = "home"
     const val LIBRARY = "library"
     const val WIZARD = "wizard"
@@ -10,8 +11,9 @@ object NavRoutes {
     const val COMMUNITY = "community"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
+    const val EDITOR = "editor/{packageName}"
 
     fun calibrate(packageName: String): String = "calibrate/$packageName"
     fun play(packageName: String): String = "play/$packageName"
+    fun editor(packageName: String): String = "editor/$packageName"
 }
-

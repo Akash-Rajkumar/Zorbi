@@ -24,6 +24,10 @@ class ZorbiApp : Application() {
     lateinit var appGraph: AppGraph
         private set
 
+    fun getGraph(): AppGraph {
+        return appGraph
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
