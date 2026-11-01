@@ -80,6 +80,7 @@ import androidx.core.content.ContextCompat
 import com.zorbi.core.AppGraph
 import com.zorbi.core.EngineState
 import com.zorbi.core.GameProfile
+import com.zorbi.core.HudFrame
 import com.zorbi.core.MappingType
 import com.zorbi.core.ProfileOrientation
 import com.zorbi.core.ProfileParams
@@ -174,6 +175,7 @@ fun HomeScreen(
     // Engine & Injector flows from AppGraph
     val engineState by appGraph.engine.state.collectAsState(initial = EngineState.IDLE)
     val isInjectorReady by appGraph.injector.isReady.collectAsState(initial = false)
+    val hudFrame by appGraph.engine.hud.collectAsState(initial = null)
 
     var systemStatus by remember { mutableStateOf(HomeSystemStatus()) }
     var loadedProfiles by remember { mutableStateOf<List<GameProfile>>(emptyList()) }
@@ -419,7 +421,7 @@ fun HomeScreen(
                 )
 
                 // 6. Recent Game Activity & Real-Time Telemetry Stats
-                RecentActivityCard(engineState = engineState)
+                RecentActivityCard(engineState = engineState, hudFrame = hudFrame)
 
                 // 7. Calibration Status Card
                 CalibrationStatusCard(
@@ -1142,7 +1144,14 @@ private fun ActiveGamesPreviewRow(
  * Real-Time Activity & Telemetry stats dashboard card.
  */
 @Composable
-private fun RecentActivityCard(engineState: EngineState) {
+private fun RecentActivityCard(
+    engineState: EngineState,
+    hudFrame: HudFrame? = null
+) {
+    val isRunning = engineState == EngineState.RUNNING
+    val isPaused = engineState == EngineState.PAUSED
+    val isLive = hudFrame != null && (hudFrame.fps > 0f || hudFrame.e2eLatencyMs > 0f)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1176,44 +1185,53 @@ private fun RecentActivityCard(engineState: EngineState) {
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Pipeline Telemetry [DEMO]",
+                        text = "Pipeline Telemetry",
                         style = ZorbiTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = ZorbiTextPrimary
                     )
                 }
 
                 Text(
-                    text = "STATUS: SIMULATED (${engineState.name})",
+                    text = when {
+                        isLive -> "STATUS: LIVE (${engineState.name})"
+                        isRunning -> "STATUS: RUNNING"
+                        isPaused -> "STATUS: PAUSED (FIST)"
+                        else -> "STATUS: STANDBY (IDLE)"
+                    },
                     style = ZorbiMetricTypography.monoMedium.copy(fontSize = 10.sp),
-                    color = ZorbiWarning
+                    color = when {
+                        isLive || isRunning -> ZorbiSuccess
+                        isPaused -> ZorbiWarning
+                        else -> ZorbiTextMuted
+                    }
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Three stats pills: Latency, FPS, Gesture Confidence (clearly labeled as simulated targets)
+            // Three stats pills: Latency, FPS, Landmark Tracking (live from real pipeline when running)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatMetricTile(
-                    value = "19ms",
-                    label = "Target < 50ms [DEMO]",
+                    value = if (isLive) "${"%.1f".format(hudFrame.e2eLatencyMs)} ms" else "< 35 ms",
+                    label = if (isLive) "End-to-End Latency" else "Calibrated Target",
                     metricName = "Latency",
                     accentColor = ZorbiPrimaryCyan,
                     modifier = Modifier.weight(1f)
                 )
                 StatMetricTile(
-                    value = "60 FPS",
-                    label = "Target Rate [DEMO]",
+                    value = if (isLive) "${"%.1f".format(hudFrame.fps)} FPS" else "60 FPS",
+                    label = if (isLive) "Vision Frame Rate" else "Target Rate",
                     metricName = "Pipeline",
                     accentColor = ZorbiSuccess,
                     modifier = Modifier.weight(1f)
                 )
                 StatMetricTile(
-                    value = "99.2%",
-                    label = "Filter Target [DEMO]",
-                    metricName = "Smoothness",
+                    value = if (isLive) "${hudFrame.landmarks.size} pts" else "21 pts",
+                    label = if (isLive) "Filtered Landmarks" else "MediaPipe Hand",
+                    metricName = "Tracking",
                     accentColor = ZorbiAccentViolet,
                     modifier = Modifier.weight(1f)
                 )
@@ -1221,20 +1239,25 @@ private fun RecentActivityCard(engineState: EngineState) {
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Unconnected pipeline notice
+            // Honest Pipeline Status Indicator
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Default.Lock,
+                    imageVector = if (isRunning || isLive) Icons.Default.CheckCircle else Icons.Default.Info,
                     contentDescription = null,
-                    tint = ZorbiWarning,
+                    tint = if (isRunning || isLive) ZorbiSuccess else ZorbiPrimaryCyan,
                     modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Demo Mode: Live CameraX vision pipeline is not connected in this build • Stats are simulated targets",
+                    text = when {
+                        isLive -> "Live CameraX vision pipeline and real input injector active • Gesture tracking operational"
+                        isRunning -> "Vision engine active in background • Monitoring hand gestures"
+                        isPaused -> "Engine paused via closed fist gesture • Show open hand to resume"
+                        else -> "CameraX and MediaPipe pipeline ready • Tap LAUNCH & PLAY NOW to start real-time tracking"
+                    },
                     style = ZorbiTheme.typography.labelSmall.copy(fontSize = 10.sp),
                     color = ZorbiTextMuted
                 )

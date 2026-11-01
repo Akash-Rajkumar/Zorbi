@@ -94,8 +94,10 @@ fun ZorbiNavHost(
                     // Handled safely
                 }
             }
+            GameLauncher.launchGame(context, pkg)
+        } else {
+            navController.navigate(NavRoutes.play(pkg))
         }
-        GameLauncher.launchGame(context, pkg)
     }
 
     NavHost(

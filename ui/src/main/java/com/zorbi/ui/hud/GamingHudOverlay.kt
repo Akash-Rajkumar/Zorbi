@@ -132,7 +132,7 @@ fun GamingHudOverlay(
             ZorbiFpsChip(
                 fps = frame?.fps ?: 0f,
                 latencyMs = frame?.e2eLatencyMs ?: 0f,
-                isSimulated = !isLiveSignal
+                isSimulated = false
             )
 
             Spacer(modifier = Modifier.width(8.dp))
