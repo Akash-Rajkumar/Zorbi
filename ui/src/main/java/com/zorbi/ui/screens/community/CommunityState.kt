@@ -68,6 +68,30 @@ data class CloudProfileItem(
                 description = "Single-hand air gestures for responsive throttle acceleration, brake control, and mid-air balance."
             ),
             CloudProfileItem(
+                id = "cloud-beach-buggy",
+                packageName = "com.vectorunit.purple.googleplay",
+                displayName = "Beach Buggy Racing",
+                author = "@TurboDrift",
+                downloads = 5120,
+                rating = 4.8f,
+                orientation = ProfileOrientation.LANDSCAPE,
+                tracker = TrackerId.HAND_DUAL_WHEEL,
+                mapping = MappingType.STEER_BUTTONS,
+                description = "Dual-hand steering wheel air gestures with powerup triggers for Beach Buggy Racing."
+            ),
+            CloudProfileItem(
+                id = "cloud-paper-io",
+                packageName = "io.voodoo.paper2",
+                displayName = "Paper.io",
+                author = "@TerritoryMaster",
+                downloads = 4390,
+                rating = 4.8f,
+                orientation = ProfileOrientation.PORTRAIT,
+                tracker = TrackerId.HAND_SINGLE,
+                mapping = MappingType.STEER_DRAG,
+                description = "Fluid continuous 360-degree air steering drag to capture territory and cut opponent trails."
+            ),
+            CloudProfileItem(
                 id = "cloud-temple-run-2",
                 packageName = "com.imangi.templerun2",
                 displayName = "Temple Run 2",

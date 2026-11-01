@@ -183,6 +183,8 @@ data class MappingEditorUiState(
             }
 
             val isLandscape = packageName.contains("hillclimb") ||
+                    packageName.contains("vectorunit") ||
+                    packageName.contains("beachbuggy") ||
                     packageName.contains("fruit") ||
                     packageName.contains("asphalt")
 
@@ -198,6 +200,8 @@ data class MappingEditorUiState(
                 displayName = when {
                     packageName.contains("subwaysurf") -> "Subway Surfers"
                     packageName.contains("hillclimb") -> "Hill Climb Racing"
+                    packageName.contains("vectorunit") || packageName.contains("beachbuggy") -> "Beach Buggy Racing"
+                    packageName.contains("paper") -> "Paper.io"
                     packageName.contains("templerun") -> "Temple Run 2"
                     packageName.contains("fruit") -> "Fruit Ninja Classic"
                     packageName.contains("asphalt") -> "Asphalt Legends Unite"

@@ -89,7 +89,8 @@ fun ZorbiNavHost(
         if (GameLauncher.isGameInstalled(context, pkg)) {
             coroutineScope.launch {
                 try {
-                    appGraph.engine.start(pkg, com.zorbi.core.PerfMode.BALANCED)
+                    val mode = settingsStorage?.load()?.perfMode ?: com.zorbi.core.PerfMode.PERFORMANCE
+                    appGraph.engine.start(pkg, mode)
                 } catch (e: Exception) {
                     // Handled safely
                 }

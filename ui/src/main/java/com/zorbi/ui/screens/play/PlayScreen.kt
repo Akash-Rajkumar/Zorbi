@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +46,7 @@ import com.zorbi.ui.components.ZorbiPrimaryButton
 import com.zorbi.ui.components.ZorbiSecondaryButton
 import com.zorbi.ui.hud.GamingHudOverlay
 import com.zorbi.ui.hud.HudOpacity
+import com.zorbi.ui.screens.settings.SettingsStorage
 import com.zorbi.ui.theme.ZorbiBackground
 import com.zorbi.ui.theme.ZorbiCardShape
 import com.zorbi.ui.theme.ZorbiMetricTypography
@@ -53,6 +55,8 @@ import com.zorbi.ui.theme.ZorbiSurfaceElevated
 import com.zorbi.ui.theme.ZorbiTextMuted
 import com.zorbi.ui.theme.ZorbiTextPrimary
 import com.zorbi.ui.theme.ZorbiTheme
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 
 /**
@@ -66,17 +70,25 @@ fun PlayScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<GameProfile?>(null) }
-    var currentFrame by remember { mutableStateOf<HudFrame?>(null) }
     val engineState by appGraph.engine.state.collectAsState(initial = EngineState.IDLE)
     val isPaused = engineState == EngineState.PAUSED
+
+    val perfMode = remember {
+        try {
+            SettingsStorage.fromContext(context).load().perfMode
+        } catch (_: Throwable) {
+            PerfMode.PERFORMANCE
+        }
+    }
 
     // Load profile and start engine pipeline
     LaunchedEffect(packageName) {
         profile = appGraph.profiles.get(packageName)
         try {
-            appGraph.engine.start(packageName, PerfMode.BALANCED)
+            appGraph.engine.start(packageName, perfMode)
         } catch (e: Exception) {
             // Handled via engine state
         }
@@ -95,21 +107,14 @@ fun PlayScreen(
         }
     }
 
-    // Collect real-time HudFrame flow from EngineController
-    LaunchedEffect(Unit) {
-        appGraph.engine.hud.collect { frame ->
-            currentFrame = frame
-        }
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF04060C)) // Deep transparent game canvas background
     ) {
-        // Master Gaming HUD Overlay Layer
-        GamingHudOverlay(
-            frame = currentFrame,
+        // Master Gaming HUD Overlay Layer (isolated in PlayHudLayer to avoid recomposing parent screen)
+        PlayHudLayer(
+            hudFlow = appGraph.engine.hud,
             isPaused = isPaused,
             modifier = Modifier.fillMaxSize()
         )
@@ -186,4 +191,23 @@ fun PlayScreen(
             }
         }
     }
+}
+
+/**
+ * Isolated HUD overlay rendering layer.
+ * Collects [com.zorbi.core.EngineController.hud] with conflation so that high-frequency HUD updates
+ * do not trigger recomposition of the main [PlayScreen] control surfaces.
+ */
+@Composable
+private fun PlayHudLayer(
+    hudFlow: SharedFlow<HudFrame>,
+    isPaused: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val frame by hudFlow.conflate().collectAsState(initial = null)
+    GamingHudOverlay(
+        frame = frame,
+        isPaused = isPaused,
+        modifier = modifier
+    )
 }

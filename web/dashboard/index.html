@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Zorbi Live Projector Dashboard — Real-time motion gaming telemetry monitoring">
+  <title>Zorbi — Live Projector Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Configuration Notice Banner (Shown dynamically when config.js is missing or unconfigured) -->
+  <div id="config-banner" class="config-banner hidden" role="alert" aria-live="polite">
+    <div class="config-banner__message">
+      <span aria-hidden="true">⚠️</span>
+      <span>Configuration file <code class="config-banner__code">config.json</code> not found or unconfigured. Copy <code class="config-banner__code">config.example.json</code> to <code class="config-banner__code">config.json</code> and configure your Supabase public anon key.</span>
+    </div>
+  </div>
+
+  <!-- System Header -->
+  <header class="dashboard-header" role="banner">
+    <div class="brand-group">
+      <div class="brand-logo" aria-label="Zorbi Logo">ZORBI</div>
+      <div class="brand-meta">
+        <h1 class="dashboard-title">Live Projector Dashboard</h1>
+        <span class="system-mode-tag">Telemetry Monitor — T-P4-6</span>
+      </div>
+    </div>
+
+    <div class="header-meta">
+      <div class="meta-item">
+        <span class="meta-label">ACTIVE SESSION</span>
+        <span id="active-session-text" class="meta-value">—</span>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">LAST UPDATED</span>
+        <time id="last-updated-text" class="meta-value">—</time>
+      </div>
+
+      <div id="connection-pill" class="status-pill status-pill--config-required" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connection-text">CONFIGURATION REQUIRED</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Grid -->
+  <main class="dashboard-grid" role="main">
+    <!-- Section B: Statistics Overview -->
+    <section class="dashboard-section section-overview" aria-labelledby="heading-overview">
+      <h2 id="heading-overview" class="section-title">Telemetry Overview</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card__label">Total Sessions</div>
+          <div id="stat-total-sessions" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">PostgREST v_session_stats (R7)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card__label">Average Engine FPS</div>
+          <div id="stat-avg-fps" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">Session-weighted average (R7)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card__label">Average Session P95 Latency</div>
+          <div id="stat-avg-latency" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">Session-weighted average (R7)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card__label">Total Gesture Events</div>
+          <div id="stat-total-gestures" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">Realtime stream (R8 Stage 3)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card__label">Leading Gesture Type</div>
+          <div id="stat-leading-gesture" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">Realtime distribution (R8 Stage 3)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card__label">Live Stream Velocity</div>
+          <div id="stat-event-velocity" class="stat-card__value stat-card__value--empty">—</div>
+          <div class="stat-card__subtext">Events / min (R8 Stage 3)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Telemetry Row: Live Feed (2/3) + Distribution (1/3) -->
+    <div class="telemetry-row">
+      <!-- Section C: Live Gesture Activity Feed -->
+      <section class="dashboard-section section-feed" aria-labelledby="heading-feed">
+        <div class="section-header-row">
+          <h2 id="heading-feed" class="section-title">Live Gesture Activity Feed</h2>
+          <span id="feed-count-badge" class="feed-count-badge">0 events buffered</span>
+        </div>
+
+        <div class="table-container" tabindex="0" role="region" aria-label="Live gesture events log">
+          <table class="feed-table">
+            <thead>
+              <tr>
+                <th scope="col">Timestamp</th>
+                <th scope="col">Gesture Type</th>
+                <th scope="col">Magnitude</th>
+                <th scope="col">Session Reference</th>
+              </tr>
+            </thead>
+            <tbody id="gesture-feed-body">
+              <tr id="feed-empty-row" class="feed-empty-row">
+                <td colspan="4" class="feed-empty-cell">
+                  <div class="empty-state-content">
+                    <span class="empty-state-icon" aria-hidden="true">📡</span>
+                    <p class="empty-state-text">Realtime gesture event stream idle. Awaiting live telemetry connection (R8).</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section D: Event Distribution Visualization -->
+      <section class="dashboard-section section-distribution" aria-labelledby="heading-distribution">
+        <h2 id="heading-distribution" class="section-title">Gesture Distribution</h2>
+        <div class="dist-card">
+          <!-- STEER -->
+          <div class="dist-row" data-gesture="STEER">
+            <div class="dist-row__header">
+              <span class="gesture-badge gesture-badge--steer">STEER</span>
+              <div class="dist-row__metrics">
+                <span id="dist-count-steer" class="dist-row__count">—</span>
+                <span id="dist-pct-steer" class="dist-row__pct">0%</span>
+              </div>
+            </div>
+            <div class="dist-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="STEER distribution percentage">
+              <div id="dist-bar-steer" class="dist-bar dist-bar--steer" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- SWIPE -->
+          <div class="dist-row" data-gesture="SWIPE">
+            <div class="dist-row__header">
+              <span class="gesture-badge gesture-badge--swipe">SWIPE</span>
+              <div class="dist-row__metrics">
+                <span id="dist-count-swipe" class="dist-row__count">—</span>
+                <span id="dist-pct-swipe" class="dist-row__pct">0%</span>
+              </div>
+            </div>
+            <div class="dist-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="SWIPE distribution percentage">
+              <div id="dist-bar-swipe" class="dist-bar dist-bar--swipe" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- SLASH -->
+          <div class="dist-row" data-gesture="SLASH">
+            <div class="dist-row__header">
+              <span class="gesture-badge gesture-badge--slash">SLASH</span>
+              <div class="dist-row__metrics">
+                <span id="dist-count-slash" class="dist-row__count">—</span>
+                <span id="dist-pct-slash" class="dist-row__pct">0%</span>
+              </div>
+            </div>
+            <div class="dist-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="SLASH distribution percentage">
+              <div id="dist-bar-slash" class="dist-bar dist-bar--slash" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- PAUSE -->
+          <div class="dist-row" data-gesture="PAUSE">
+            <div class="dist-row__header">
+              <span class="gesture-badge gesture-badge--pause">PAUSE</span>
+              <div class="dist-row__metrics">
+                <span id="dist-count-pause" class="dist-row__count">—</span>
+                <span id="dist-pct-pause" class="dist-row__pct">0%</span>
+              </div>
+            </div>
+            <div class="dist-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="PAUSE distribution percentage">
+              <div id="dist-bar-pause" class="dist-bar dist-bar--pause" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div id="dist-empty-message" class="state-message">
+            Awaiting session statistics from Supabase PostgREST (R7)...
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Section E: Footer & System Diagnostics -->
+  <footer class="dashboard-footer" role="contentinfo">
+    <div class="footer-diagnostics">
+      <div class="diagnostic-item">
+        <span class="diagnostic-label">DATA SOURCE:</span>
+        <span id="diag-data-source" class="diagnostic-value">Supabase PostgREST (R7)</span>
+      </div>
+      <div class="diagnostic-item">
+        <span class="diagnostic-label">REALTIME CHANNEL:</span>
+        <span id="diag-realtime-channel" class="diagnostic-value">public:gesture_events (R8)</span>
+      </div>
+      <div class="diagnostic-item">
+        <span class="diagnostic-label">REFRESH STATUS:</span>
+        <span id="diag-refresh-status" class="diagnostic-value">Idle</span>
+      </div>
+      <div class="diagnostic-item">
+        <span class="diagnostic-label">SYSTEM HEALTH:</span>
+        <span id="diag-system-health" class="diagnostic-value diagnostic-value--nominal">Awaiting Configuration</span>
+      </div>
+    </div>
+    <div class="footer-version">ZORBI TELEMETRY v1.0 — T-P4-6 GATE</div>
+  </footer>
+
+  <!-- Main Dashboard Application Logic (Loads config asynchronously) -->
+  <script src="app.js"></script>
+</body>
+</html>
+

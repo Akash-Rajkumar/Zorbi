@@ -76,6 +76,7 @@ class HandSingleTracker(
     override val stats: StateFlow<TrackerStats> = statsCollector.stats
 
     private val sessionCounter = AtomicLong(0L)
+    private val isInferring = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var isRunning = false
     @Volatile private var currentPerfMode: PerfMode? = null
     private val startStopMutex = Mutex()
@@ -129,6 +130,7 @@ class HandSingleTracker(
                 }
                 .setErrorListener { error ->
                     Log.e(TAG, "MediaPipe LIVE_STREAM error in session $sessionId: ${error.message}", error)
+                    isInferring.set(false)
                 }
                 .build()
 
@@ -153,6 +155,7 @@ class HandSingleTracker(
                 }
                 .setErrorListener { error ->
                     Log.e(TAG, "MediaPipe LIVE_STREAM error in session $sessionId: ${error.message}", error)
+                    isInferring.set(false)
                 }
                 .build()
 
@@ -229,6 +232,7 @@ class HandSingleTracker(
 
     private suspend fun stopInternal() {
         isRunning = false
+        isInferring.set(false)
         currentPerfMode = null
         sessionCounter.incrementAndGet() // Invalidate pending and in-flight callbacks
         pendingSubmissions.clear()
@@ -284,6 +288,11 @@ class HandSingleTracker(
 
             val landmarker = handLandmarker ?: return
 
+            if (!isInferring.compareAndSet(false, true)) {
+                statsCollector.recordDropped()
+                return
+            }
+
             val rawBitmap = imageProxy.toBitmap()
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -314,6 +323,7 @@ class HandSingleTracker(
             landmarker.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during frame analysis in session $sessionId", e)
+            isInferring.set(false)
         } finally {
             // Buffer must ALWAYS be closed to prevent CameraX buffer starvation
             imageProxy.close()
@@ -322,7 +332,10 @@ class HandSingleTracker(
 
     private fun handleResult(result: HandLandmarkerResult, sessionId: Long) {
         val timestampMs = result.timestampMs()
-        val submission = pendingSubmissions.remove(timestampMs) ?: return
+        val submission = pendingSubmissions.remove(timestampMs)
+        submission?.bitmap?.recycle()
+        isInferring.set(false)
+        if (submission == null) return
         submission.bitmap?.recycle()
         val nowNanos = SystemClock.elapsedRealtimeNanos()
 

@@ -1,8 +1,26 @@
+import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
+}
+
+val localProperties = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.exists()) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun String.toBuildConfigLiteral(): String {
+    val escaped = this
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "")
+        .replace("\r", "")
+
+    return "\"$escaped\""
 }
 
 android {
@@ -13,6 +31,18 @@ android {
         applicationId = "com.zorbi.app"
         minSdk = 26
         targetSdk = 34
+  	buildConfigField(
+    "String",
+    "SUPABASE_URL",
+    localProperties.getProperty("SUPABASE_URL", "").toBuildConfigLiteral()
+)
+
+buildConfigField(
+    "String",
+    "SUPABASE_ANON_KEY",
+    localProperties.getProperty("SUPABASE_ANON_KEY", "").toBuildConfigLiteral()
+)
+
         versionCode = 1
         versionName = "0.1.0-alpha"
 

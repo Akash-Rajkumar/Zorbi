@@ -84,6 +84,7 @@ import com.zorbi.core.HudFrame
 import com.zorbi.core.MappingType
 import com.zorbi.core.ProfileOrientation
 import com.zorbi.core.ProfileParams
+import com.zorbi.core.TargetPoint
 import com.zorbi.core.TrackerId
 import com.zorbi.ui.R
 import com.zorbi.ui.animations.interactiveBounce
@@ -239,12 +240,37 @@ fun HomeScreen(
                         params = ProfileParams(deadzoneDeg = 8.0f)
                     ),
                     GameProfile(
+                        packageName = "com.vectorunit.purple.googleplay",
+                        displayName = "Beach Buggy Racing",
+                        orientation = ProfileOrientation.LANDSCAPE,
+                        tracker = TrackerId.HAND_DUAL_WHEEL,
+                        mapping = MappingType.STEER_BUTTONS,
+                        params = ProfileParams(deadzoneDeg = 8.0f),
+                        targets = mapOf(
+                            "left" to TargetPoint(0.15f, 0.75f),
+                            "right" to TargetPoint(0.85f, 0.75f)
+                        )
+                    ),
+                    GameProfile(
                         packageName = "com.halfbrick.fruitninja",
                         displayName = "Fruit Ninja",
                         orientation = ProfileOrientation.LANDSCAPE,
                         tracker = TrackerId.HAND_SINGLE,
                         mapping = MappingType.SLASH,
                         params = ProfileParams(slashMinLength = 0.15f)
+                    ),
+                    GameProfile(
+                        packageName = "io.voodoo.paper2",
+                        displayName = "Paper.io",
+                        orientation = ProfileOrientation.PORTRAIT,
+                        tracker = TrackerId.HAND_SINGLE,
+                        mapping = MappingType.STEER_DRAG,
+                        params = ProfileParams(deadzoneDeg = 5.0f, cooldownMs = 150L),
+                        targets = mapOf(
+                            "center" to TargetPoint(0.50f, 0.65f),
+                            "left" to TargetPoint(0.20f, 0.65f),
+                            "right" to TargetPoint(0.80f, 0.65f)
+                        )
                     )
                 )
                 defaults.forEach { appGraph.profiles.saveLocal(it) }
@@ -766,6 +792,8 @@ private fun HeroPlayCard(
     val haptics = rememberZorbiHaptics()
     val displayName = profile?.displayName ?: when (fallbackPackageName) {
         "com.fingersoft.hillclimb" -> "Hill Climb Racing"
+        "com.vectorunit.purple.googleplay", "com.vectorunit.cobalt.googleplay" -> "Beach Buggy Racing"
+        "io.voodoo.paper2", "io.voodoo.paperio" -> "Paper.io"
         "com.halfbrick.fruitninja" -> "Fruit Ninja"
         "com.mojang.minecraftpe" -> "Minecraft"
         "com.kiloo.subwaysurf" -> "Subway Surfers"
@@ -777,7 +805,7 @@ private fun HeroPlayCard(
         else -> fallbackPackageName.substringAfterLast('.').replaceFirstChar { it.uppercase() }
     }
     val orientationName = profile?.orientation?.name ?: when (fallbackPackageName) {
-        "com.fingersoft.hillclimb", "com.halfbrick.fruitninja", "com.mojang.minecraftpe" -> "LANDSCAPE"
+        "com.fingersoft.hillclimb", "com.vectorunit.purple.googleplay", "com.vectorunit.cobalt.googleplay", "com.halfbrick.fruitninja", "com.mojang.minecraftpe" -> "LANDSCAPE"
         else -> "PORTRAIT"
     }
     val packageName = profile?.packageName ?: fallbackPackageName
@@ -1044,6 +1072,8 @@ private fun ActiveGamesPreviewRow(
     val previewGames = listOf(
         QuickGamePreview("Subway Surfers", "com.kiloo.subwaysurf", "Lane Swipe", "PORTRAIT", "60 FPS"),
         QuickGamePreview("Hill Climb Racing", "com.fingersoft.hillclimb", "Steer Buttons", "LANDSCAPE", "60 FPS"),
+        QuickGamePreview("Paper.io", "io.voodoo.paper2", "Steer Drag", "PORTRAIT", "60 FPS"),
+        QuickGamePreview("Beach Buggy Racing", "com.vectorunit.purple.googleplay", "Steer Buttons", "LANDSCAPE", "60 FPS"),
         QuickGamePreview("Fruit Ninja", "com.halfbrick.fruitninja", "Air Slash", "LANDSCAPE", "60 FPS"),
         QuickGamePreview("Minecraft", "com.mojang.minecraftpe", "Hand Cursor", "LANDSCAPE", "60 FPS", true)
     )

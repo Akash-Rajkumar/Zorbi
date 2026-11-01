@@ -120,7 +120,12 @@ class RealCalibrationRepository(
                     targetFile.delete()
                 }
                 if (!tempFile.renameTo(targetFile)) {
-                    throw IOException("Failed to rename temporary calibration file to ${targetFile.absolutePath}")
+                    try {
+                        tempFile.copyTo(targetFile, overwrite = true)
+                        tempFile.delete()
+                    } catch (copyEx: Exception) {
+                        throw IOException("Failed to move or copy temporary calibration file to ${targetFile.absolutePath}", copyEx)
+                    }
                 }
             }
         } catch (e: Exception) {

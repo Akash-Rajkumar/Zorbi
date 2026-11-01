@@ -1,0 +1,4 @@
+# Local Supabase configuration (contains API keys)
+config.json
+config.js
+

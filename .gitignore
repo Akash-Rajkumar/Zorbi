@@ -38,3 +38,7 @@ Thumbs.db
 # Profiler & captures
 captures/
 
+
+# Kotlin daemon/build cache
+.kotlin/
+

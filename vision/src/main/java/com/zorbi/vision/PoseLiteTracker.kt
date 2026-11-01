@@ -84,6 +84,7 @@ class PoseLiteTracker(
     override val stats: StateFlow<TrackerStats> = statsCollector.stats
 
     private val sessionCounter = AtomicLong(0L)
+    private val isInferring = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var isRunning = false
     @Volatile private var currentPerfMode: PerfMode? = null
     private val startStopMutex = Mutex()
@@ -135,6 +136,7 @@ class PoseLiteTracker(
             }
             .setErrorListener { error ->
                 Log.e(TAG, "MediaPipe LIVE_STREAM error in POSE_LITE session $sessionId: ${error.message}", error)
+                isInferring.set(false)
             }
             .build()
 
@@ -208,6 +210,7 @@ class PoseLiteTracker(
 
     private suspend fun stopInternal() {
         isRunning = false
+        isInferring.set(false)
         currentPerfMode = null
         sessionCounter.incrementAndGet() // Invalidate pending and in-flight callbacks
         pendingSubmissions.clear()
@@ -264,12 +267,19 @@ class PoseLiteTracker(
 
             val landmarker = poseLandmarker ?: return
 
+            if (!isInferring.compareAndSet(false, true)) {
+                statsCollector.recordDropped()
+                return
+            }
+
             val rawBitmap = imageProxy.toBitmap()
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
             val rotatedBitmap = if (rotationDegrees != 0) {
                 val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-                android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                val rotated = android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                rawBitmap.recycle()
+                rotated
             } else {
                 rawBitmap
             }
@@ -287,10 +297,11 @@ class PoseLiteTracker(
                 ts
             }
 
-            pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId)
+            pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId, rotatedBitmap)
             landmarker.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during frame analysis in pose session $sessionId", e)
+            isInferring.set(false)
         } finally {
             // Buffer must ALWAYS be closed to prevent CameraX buffer starvation
             imageProxy.close()
@@ -299,7 +310,10 @@ class PoseLiteTracker(
 
     private fun handleResult(result: PoseLandmarkerResult, sessionId: Long) {
         val timestampMs = result.timestampMs()
-        val submission = pendingSubmissions.remove(timestampMs) ?: return
+        val submission = pendingSubmissions.remove(timestampMs)
+        submission?.bitmap?.recycle()
+        isInferring.set(false)
+        if (submission == null) return
         val nowNanos = SystemClock.elapsedRealtimeNanos()
 
         if (!isRunning || sessionCounter.get() != sessionId || submission.sessionId != sessionId) {
@@ -358,7 +372,7 @@ class PoseLiteTracker(
         }
     }
 
-    private data class FrameSubmission(val arrivalNanos: Long, val sessionId: Long)
+    private data class FrameSubmission(val arrivalNanos: Long, val sessionId: Long, val bitmap: android.graphics.Bitmap? = null)
 
     private class TrackerLifecycleOwner : LifecycleOwner {
         private val registry = LifecycleRegistry(this)
