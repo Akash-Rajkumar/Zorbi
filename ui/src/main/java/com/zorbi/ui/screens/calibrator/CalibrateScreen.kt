@@ -3,6 +3,7 @@ package com.zorbi.ui.screens.calibrator
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +16,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,6 +49,8 @@ import com.zorbi.core.PoseFrame
 import com.zorbi.core.Tracker
 import com.zorbi.core.TrackerFrame
 import com.zorbi.core.TrackerId
+import com.zorbi.ui.components.HandTrackingStatus
+import com.zorbi.ui.components.HandTrackingStatusChip
 import com.zorbi.ui.components.StatusLevel
 import com.zorbi.ui.components.ZorbiBadge
 import com.zorbi.ui.components.ZorbiErrorCard
@@ -62,6 +67,7 @@ import com.zorbi.ui.theme.ZorbiBorder
 import com.zorbi.ui.theme.ZorbiMetricTypography
 import com.zorbi.ui.theme.ZorbiPrimaryCyan
 import com.zorbi.ui.theme.ZorbiSuccess
+import com.zorbi.ui.theme.ZorbiSurfaceElevated
 import com.zorbi.ui.theme.ZorbiTextMuted
 import com.zorbi.ui.theme.ZorbiTextPrimary
 import com.zorbi.ui.theme.ZorbiTheme
@@ -92,6 +98,8 @@ fun CalibrateScreen(
     var tracker by remember { mutableStateOf<Tracker?>(null) }
     var uiState by remember { mutableStateOf(CalibratorUiState()) }
     val samples = remember { mutableStateListOf<TrackerFrame>() }
+    var showDebugBones by remember { mutableStateOf(false) }
+    var currentTrackingStatus by remember { mutableStateOf(HandTrackingStatus.NOT_CONNECTED) }
 
     // Load game profile to identify active tracker
     LaunchedEffect(packageName) {
@@ -324,12 +332,65 @@ fun CalibrateScreen(
                 subtitle = "Mirrored front camera landmarks (on-device only)"
             )
 
+            // Live Tracking Indicator Controls (Status Chip & Debug Bones Toggle)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Tracking Status Chip with upstream confidence
+                val confidence = when (val f = uiState.lastFrame) {
+                    is HandsFrame -> f.hands.firstOrNull()?.score
+                    is PoseFrame -> f.score
+                    else -> null
+                }
+                HandTrackingStatusChip(
+                    status = currentTrackingStatus,
+                    confidence = confidence
+                )
+
+                // Debug Bones Toggle
+                Surface(
+                    modifier = Modifier.clickable { showDebugBones = !showDebugBones },
+                    color = if (showDebugBones) ZorbiAccentViolet.copy(alpha = 0.2f) else ZorbiSurfaceElevated,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (showDebugBones) ZorbiAccentViolet else ZorbiBorder
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        ZorbiStatusDot(
+                            level = if (showDebugBones) StatusLevel.SUCCESS else StatusLevel.NEUTRAL,
+                            animatePulse = false
+                        )
+                        Text(
+                            text = if (showDebugBones) "DEBUG BONES" else "FINGERTIP ONLY",
+                            style = ZorbiMetricTypography.copy(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (showDebugBones) ZorbiAccentViolet else ZorbiTextMuted
+                            )
+                        )
+                    }
+                }
+            }
+
             SkeletonCanvas(
                 frame = uiState.lastFrame,
-                isTrackingActive = uiState.isTrackingLocked,
+                isTrackingActive = tracker != null,
+                showFingertipMarker = true,
+                showFadingTrail = true,
+                showDebugBones = showDebugBones,
+                showStatusOverlay = true,
+                onStatusChange = { currentTrackingStatus = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(260.dp)
+                    .height(280.dp)
             )
 
             // Cancel button

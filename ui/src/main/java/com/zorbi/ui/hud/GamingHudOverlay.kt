@@ -109,6 +109,10 @@ fun GamingHudOverlay(
                 SkeletonCanvas(
                     frame = trackerFrame,
                     isTrackingActive = frame.landmarks.isNotEmpty(),
+                    showFingertipMarker = true,
+                    showFadingTrail = true,
+                    showDebugBones = (opacity == HudOpacity.FULL),
+                    showStatusOverlay = false,
                     modifier = Modifier.fillMaxSize()
                 )
             }
