@@ -4,13 +4,13 @@ import com.zorbi.core.Calibration
 import com.zorbi.core.TrackerFrame
 
 enum class CalibrationPhase(val title: String, val instruction: String) {
-    READY("Ready", "Position your phone securely and face the front camera."),
-    DETECTING("Aligning", "Hold your hand upright and clear in front of the camera."),
-    RECORDING_NEUTRAL("Neutral Center", "Keep your hand/wrist in your natural, straight rest position."),
-    RECORDING_RANGE("Range of Motion", "Tilt and move through your comfortable left/right and up/down span."),
-    COMPUTING("Analyzing", "Calculating personalized deadzones, reach scales, and angles..."),
-    SUCCESS("Complete", "Motion profile calibrated! Ready for touch injection."),
-    ERROR("Tracking Lost", "Insufficient tracking samples detected. Please try again.")
+    READY("Ready", "Put your phone on a table facing you."),
+    DETECTING("Finding Hand", "Show your open hand to the front camera."),
+    RECORDING_NEUTRAL("Center Hand", "Hold your hand still in the center of the screen."),
+    RECORDING_RANGE("Move Hand", "Slowly move your hand left, right, up, and down."),
+    COMPUTING("Saving", "Saving your motion controls..."),
+    SUCCESS("All Done!", "Calibration complete! Tap below to start playing."),
+    ERROR("Hand Lost", "We lost sight of your hand. Please try again with good lighting.")
 }
 
 data class CalibratorUiState(

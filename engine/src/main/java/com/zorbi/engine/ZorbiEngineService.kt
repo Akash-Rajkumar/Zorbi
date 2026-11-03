@@ -19,10 +19,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Foreground Service hosting the Zorbi vision, gesture processing, and input injection engine.
+ * Foreground service ensuring uninterrupted vision tracking while external games are running.
  *
- * Implements:
- * 1. Android 14 Foreground Service lifecycle with [ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA].
+ * Responsibilities:
+ * 1. Android 14+ compatible foreground service lifecycle with [ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA].
  * 2. Persistent ongoing notification keeping tracking alive while external games are in the foreground.
  * 3. Safe start and stop commands with graceful teardown.
  */

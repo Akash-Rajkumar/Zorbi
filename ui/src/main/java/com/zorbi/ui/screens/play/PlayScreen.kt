@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,9 +73,24 @@ fun PlayScreen(
     val engineState by appGraph.engine.state.collectAsState(initial = EngineState.IDLE)
     val isPaused = engineState == EngineState.PAUSED
 
+    val context = LocalContext.current
+    val activity = context as? android.app.Activity
+
+    DisposableEffect(profile?.orientation) {
+        if (profile?.orientation == com.zorbi.core.ProfileOrientation.LANDSCAPE) {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        onDispose {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     // Load profile and start engine pipeline
     LaunchedEffect(packageName) {
-        profile = appGraph.profiles.get(packageName)
+        val loaded = appGraph.profiles.get(packageName)
+        profile = loaded
+        val guide = com.zorbi.ui.util.GameGestureAdvisor.getGuide(packageName, loaded)
+        com.zorbi.ui.util.ZorbiVoiceCoach.speak(guide.spokenVoiceScript)
         try {
             appGraph.engine.start(packageName, PerfMode.BALANCED)
         } catch (e: Exception) {

@@ -156,6 +156,8 @@ fun ZorbiRightDrawer(
     val gamesList = remember {
         mutableStateListOf(
             DrawerGame("Subway Surfers", "com.kiloo.subwaysurf", "Target 60 FPS (Verified)", "PORTRAIT", true, true),
+            DrawerGame("Bus Simulator Indonesia", "com.maleo.bussimulatorid", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
+            DrawerGame("Dr. Driving", "com.ansangha.drdriving", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
             DrawerGame("Hill Climb Racing", "com.fingersoft.hillclimb", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),
             DrawerGame("Paper.io", "io.voodoo.paper2", "Target 60 FPS (Verified)", "PORTRAIT", true, false),
             DrawerGame("Beach Buggy Racing", "com.vectorunit.purple.googleplay", "Target 60 FPS (Verified)", "LANDSCAPE", true, false),

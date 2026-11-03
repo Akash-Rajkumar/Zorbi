@@ -31,7 +31,9 @@ class ZorbiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
+        com.zorbi.ui.util.ZorbiVoiceCoach.init(this)
         // Phase 4: Wire live RealAppGraph containing real input injector and engine controller
         appGraph = RealAppGraph.createDefault(this)
     }
@@ -48,5 +50,10 @@ class ZorbiApp : Application() {
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
+    }
+
+    companion object {
+        var instance: ZorbiApp? = null
+            private set
     }
 }

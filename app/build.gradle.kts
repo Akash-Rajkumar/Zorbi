@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -59,6 +60,7 @@ dependencies {
     implementation(project(":engine"))
     implementation(project(":ui"))
     implementation(project(":data"))
+    implementation(libs.okhttp)
 
     debugImplementation(project(":fakes"))
 
@@ -69,11 +71,13 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.lifecycle)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
 
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
 }
-

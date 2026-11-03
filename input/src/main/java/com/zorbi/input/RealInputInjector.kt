@@ -108,7 +108,25 @@ class RealInputInjector(
             val dur = durationMs.coerceIn(MIN_GESTURE_DURATION_MS, 1500L)
             val stroke = GestureDescription.StrokeDescription(path, 0L, dur)
             val gesture = GestureDescription.Builder().addStroke(stroke).build()
-            service.dispatchGesture(gesture, null, null)
+            val dx = endX - startX
+            val dy = endY - startY
+            val dirStr = if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                if (dx > 0) "RIGHT" else "LEFT"
+            } else {
+                if (dy > 0) "DOWN" else "UP"
+            }
+            ZorbiAccessibilityService.instance?.showFeedback("⚡ SWIPE $dirStr")
+
+            val callback = object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    Log.i(TAG, "Touch stroke injected successfully: ($startX, $startY) -> ($endX, $endY)")
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.w(TAG, "Touch stroke cancelled by system: ($startX, $startY) -> ($endX, $endY)")
+                }
+            }
+            val dispatched = service.dispatchGesture(gesture, callback, null)
+            Log.i(TAG, "Dispatched swipe to accessibility service: $dispatched")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to dispatch swipe gesture from ($startX, $startY) to ($endX, $endY)", e)
         }

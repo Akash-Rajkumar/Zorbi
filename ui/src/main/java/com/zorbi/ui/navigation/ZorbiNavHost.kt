@@ -69,17 +69,22 @@ fun ZorbiNavHost(
     }
 
     val coroutineScope = rememberCoroutineScope()
+    val appScope = remember { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob()) }
     val handleLaunchGame: (String) -> Unit = { pkg ->
+        val guide = com.zorbi.ui.util.GameGestureAdvisor.getGuide(pkg)
+        com.zorbi.ui.util.ZorbiVoiceCoach.speak("Starting ${guide.gameTitle}. " + guide.spokenVoiceScript)
         if (GameLauncher.isGameInstalled(context, pkg)) {
-            coroutineScope.launch {
+            appScope.launch {
                 try {
                     appGraph.engine.start(pkg, com.zorbi.core.PerfMode.BALANCED)
                 } catch (e: Exception) {
-                    // Handled safely
+                    android.util.Log.e("ZorbiNavHost", "Failed to start engine", e)
                 }
+                GameLauncher.launchGame(context, pkg)
             }
+        } else {
+            GameLauncher.launchGame(context, pkg)
         }
-        GameLauncher.launchGame(context, pkg)
     }
 
     NavHost(

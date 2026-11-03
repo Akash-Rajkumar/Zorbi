@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.vectorunit.purple.googleplay",
+  "displayName": "Beach Buggy Racing",
+  "orientation": "LANDSCAPE",
+  "tracker": "HAND_DUAL_WHEEL",
+  "mapping": "STEER_BUTTONS",
+  "targets": {
+    "left": { "x": 0.15, "y": 0.85 },
+    "right": { "x": 0.85, "y": 0.85 },
+    "center": { "x": 0.50, "y": 0.85 }
+  },
+  "params": {
+    "deadzoneDeg": 10.0,
+    "cooldownMs": 200,
+    "swipeMinSpeed": 1.0,
+    "slashMinLength": 0.15,
+    "smoothing": {
+      "minCutoff": 1.2,
+      "beta": 0.02
+    }
+  }
+}
+

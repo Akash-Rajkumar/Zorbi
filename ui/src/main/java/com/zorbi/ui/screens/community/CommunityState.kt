@@ -44,6 +44,30 @@ data class CloudProfileItem(
          */
         val CATALOG: List<CloudProfileItem> = listOf(
             CloudProfileItem(
+                id = "cloud-bus-simulator-id",
+                packageName = "com.maleo.bussimulatorid",
+                displayName = "Bus Simulator Indonesia",
+                author = "@ZorbiVerified",
+                downloads = 8940,
+                rating = 4.95f,
+                orientation = ProfileOrientation.LANDSCAPE,
+                tracker = TrackerId.HAND_DUAL_WHEEL,
+                mapping = MappingType.STEER_BUTTONS,
+                description = "Cockpit 3D steering wheel tilt, forward reach gas/brake pedals, and Drive/Reverse gear flick controls."
+            ),
+            CloudProfileItem(
+                id = "cloud-dr-driving",
+                packageName = "com.ansangha.drdriving",
+                displayName = "Dr. Driving",
+                author = "@ZorbiVerified",
+                downloads = 7620,
+                rating = 4.92f,
+                orientation = ProfileOrientation.LANDSCAPE,
+                tracker = TrackerId.HAND_DUAL_WHEEL,
+                mapping = MappingType.STEER_BUTTONS,
+                description = "Urban driving precision steering wheel, dual forward-reach pedals, and quick-shift gear selector."
+            ),
+            CloudProfileItem(
                 id = "cloud-subway-surfers",
                 packageName = "com.kiloo.subwaysurf",
                 displayName = "Subway Surfers",

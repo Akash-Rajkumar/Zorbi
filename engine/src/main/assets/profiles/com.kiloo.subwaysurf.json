@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.kiloo.subwaysurf",
+  "displayName": "Subway Surfers",
+  "orientation": "PORTRAIT",
+  "tracker": "HAND_SINGLE",
+  "mapping": "LANE_SWIPE",
+  "targets": {
+    "left": { "x": 0.15, "y": 0.50 },
+    "right": { "x": 0.85, "y": 0.50 },
+    "up": { "x": 0.50, "y": 0.20 },
+    "down": { "x": 0.50, "y": 0.80 },
+    "center": { "x": 0.50, "y": 0.50 }
+  },
+  "params": {
+    "deadzoneDeg": 8.0,
+    "cooldownMs": 250,
+    "swipeMinSpeed": 0.25,
+    "slashMinLength": 0.15,
+    "smoothing": {
+      "minCutoff": 1.0,
+      "beta": 0.01
+    }
+  }
+}
