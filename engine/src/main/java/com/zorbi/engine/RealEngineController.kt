@@ -409,28 +409,35 @@ class RealEngineController(
                         val rightBtn = profile.targets["right"] ?: ZorbiGestureConfig.rightArrow
 
                         if (event.value >= 0.90f) {
-                            inputInjector.holdAt(Pt(gasTarget.x, gasTarget.y))
                             if (lastSteerState != "GAS") {
+                                inputInjector.release()
                                 lastSteerState = "GAS"
                                 showInGameFeedback("🏎️ GAS (ACCELERATING) • RIGHT HAND FORWARD")
                             }
+                            inputInjector.holdAt(Pt(gasTarget.x, gasTarget.y))
                         } else if (event.value <= -0.90f) {
-                            inputInjector.holdAt(Pt(brakeTarget.x, brakeTarget.y))
                             if (lastSteerState != "BRAKE") {
+                                inputInjector.release()
                                 lastSteerState = "BRAKE"
                                 showInGameFeedback("🛑 BRAKE (STOPPING) • LEFT HAND FORWARD")
                             }
+                            inputInjector.holdAt(Pt(brakeTarget.x, brakeTarget.y))
                         } else {
                             val angle = event.angleDeg
                             val deadzone = profile.params.deadzoneDeg
                             if (kotlin.math.abs(angle) > deadzone) {
+                                if (lastSteerState != "STEER") {
+                                    inputInjector.release()
+                                    lastSteerState = "STEER"
+                                    showInGameFeedback("🔄 STEERING: ${angle.toInt()}°")
+                                }
                                 if (profile.targets.containsKey("steer_wheel") ||
                                     ZorbiGestureConfig.steerLayout == ZorbiGestureConfig.SteerLayout.LEFT_WHEEL_RIGHT_PEDALS) {
                                     val rad = Math.toRadians(angle.toDouble())
                                     val radius = 0.08f
                                     val touchX = (steerCenter.x + kotlin.math.sin(rad) * radius).toFloat()
                                     val touchY = (steerCenter.y - kotlin.math.cos(rad) * radius * 0.4f).toFloat()
-                                    inputInjector.holdAt(Pt(touchX, touchY))
+                                    inputInjector.dragTo(Pt(touchX, touchY))
                                 } else {
                                     if (angle < 0f) {
                                         inputInjector.holdAt(Pt(leftBtn.x, leftBtn.y))
@@ -438,13 +445,9 @@ class RealEngineController(
                                         inputInjector.holdAt(Pt(rightBtn.x, rightBtn.y))
                                     }
                                 }
-                                if (lastSteerState != "STEER") {
-                                    lastSteerState = "STEER"
-                                    showInGameFeedback("🔄 STEERING: ${angle.toInt()}°")
-                                }
                             } else {
-                                inputInjector.release()
                                 if (lastSteerState != "NEUTRAL") {
+                                    inputInjector.release()
                                     lastSteerState = "NEUTRAL"
                                     showInGameFeedback("🎮 COASTING • HANDS LEVEL")
                                 }
@@ -455,22 +458,24 @@ class RealEngineController(
                         val leftTarget = profile.targets["left"] ?: profile.targets["brake"] ?: com.zorbi.core.TargetPoint(0.14f, 0.82f)
                         val rightTarget = profile.targets["right"] ?: profile.targets["gas"] ?: com.zorbi.core.TargetPoint(0.89f, 0.82f)
                         if (event.value < -deadzone) {
-                            Log.d(TAG, "Injecting Steer Left: ${event.value}")
-                            inputInjector.holdAt(Pt(leftTarget.x, leftTarget.y))
                             if (lastSteerState != "BRAKE") {
+                                inputInjector.release()
                                 lastSteerState = "BRAKE"
                                 showInGameFeedback("🛑 BRAKE ACTIVE (Left Hand Forward)")
                             }
+                            Log.d(TAG, "Injecting Steer Left: ${event.value}")
+                            inputInjector.holdAt(Pt(leftTarget.x, leftTarget.y))
                         } else if (event.value > deadzone) {
-                            Log.d(TAG, "Injecting Steer Right: ${event.value}")
-                            inputInjector.holdAt(Pt(rightTarget.x, rightTarget.y))
                             if (lastSteerState != "GAS") {
+                                inputInjector.release()
                                 lastSteerState = "GAS"
                                 showInGameFeedback("🏎️ GAS ACTIVE (Right Hand Forward)")
                             }
+                            Log.d(TAG, "Injecting Steer Right: ${event.value}")
+                            inputInjector.holdAt(Pt(rightTarget.x, rightTarget.y))
                         } else {
-                            inputInjector.release()
                             if (lastSteerState != "NEUTRAL") {
+                                inputInjector.release()
                                 lastSteerState = "NEUTRAL"
                                 showInGameFeedback("🎮 COASTING (Hands Back)")
                             }

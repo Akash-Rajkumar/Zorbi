@@ -103,6 +103,7 @@ class HandDualWheelTracker(
 
     @Volatile private var nextAllowedArrivalMs: Long = 0L
     @Volatile private var lastSubmittedTimestampMs: Long = 0L
+    @Volatile private var isAnalyzingFrame = false
     private val pendingSubmissions = ConcurrentHashMap<Long, FrameSubmission>()
 
     override suspend fun start(perf: PerfMode) = startStopMutex.withLock {
@@ -139,6 +140,7 @@ class HandDualWheelTracker(
                     handleResult(result, sessionId)
                 }
                 .setErrorListener { error ->
+                    isAnalyzingFrame = false
                     Log.e(TAG, "MediaPipe LIVE_STREAM error (GPU) in dual-wheel session $sessionId: ${error.message}", error)
                 }
                 .build()
@@ -160,6 +162,7 @@ class HandDualWheelTracker(
                     handleResult(result, sessionId)
                 }
                 .setErrorListener { error ->
+                    isAnalyzingFrame = false
                     Log.e(TAG, "MediaPipe LIVE_STREAM error (CPU) in dual-wheel session $sessionId: ${error.message}", error)
                 }
                 .build()
@@ -265,6 +268,7 @@ class HandDualWheelTracker(
 
     private suspend fun stopInternal() {
         isRunning = false
+        isAnalyzingFrame = false
         currentPerfMode = null
         orientationListener?.disable()
         orientationListener = null
@@ -313,6 +317,12 @@ class HandDualWheelTracker(
                 return
             }
 
+            // Drop frame if previous inference is still in-flight to prevent MediaPipe queue backlog
+            if (isAnalyzingFrame) {
+                statsCollector.recordDropped()
+                return
+            }
+
             // Apply frame interval throttling if configured (e.g. PERFORMANCE mode)
             if (frameIntervalMs > 0L) {
                 if (arrivalMs < nextAllowedArrivalMs) {
@@ -329,7 +339,9 @@ class HandDualWheelTracker(
 
             val rotatedBitmap = if (rotationDegrees != 0) {
                 val matrix = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-                android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                val rot = android.graphics.Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                rawBitmap.recycle()
+                rot
             } else {
                 rawBitmap
             }
@@ -347,9 +359,11 @@ class HandDualWheelTracker(
                 ts
             }
 
+            isAnalyzingFrame = true
             pendingSubmissions[timestampMs] = FrameSubmission(arrivalNanos, sessionId)
             landmarker.detectAsync(mpImage, timestampMs)
         } catch (e: Exception) {
+            isAnalyzingFrame = false
             Log.e(TAG, "Exception during frame analysis in dual-wheel session $sessionId", e)
         } finally {
             // Buffer must ALWAYS be closed to prevent CameraX buffer starvation
@@ -358,6 +372,7 @@ class HandDualWheelTracker(
     }
 
     private fun handleResult(result: HandLandmarkerResult, sessionId: Long) {
+        isAnalyzingFrame = false
         val timestampMs = result.timestampMs()
         val submission = pendingSubmissions.remove(timestampMs) ?: return
         val nowNanos = SystemClock.elapsedRealtimeNanos()

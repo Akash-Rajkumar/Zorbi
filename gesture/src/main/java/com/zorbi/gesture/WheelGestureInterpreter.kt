@@ -88,6 +88,14 @@ class WheelGestureInterpreter(
             frame.hands
         }
 
+        // Support Single Hand Mode when configured
+        if (allHands.size == 1 && ZorbiGestureConfig.handMode == ZorbiGestureConfig.HandMode.SINGLE_HAND) {
+            val hand = allHands[0]
+            if (hand.score >= minConfidence && hand.landmarks.size >= 21) {
+                return processSingleHand(hand, frame.tsNanos, profile, cal)
+            }
+        }
+
         // Require at least 2 hands for dual-hand steering wheel
         if (allHands.size < 2) {
             return handleTrackingLoss(frame.tsNanos)
@@ -105,14 +113,8 @@ class WheelGestureInterpreter(
             return handleTrackingLoss(frame.tsNanos)
         }
 
-        // Identify Left Hand vs Right Hand
-        val (handL, handR) = if (hand0.side == Side.LEFT && hand1.side == Side.RIGHT) {
-            hand0 to hand1
-        } else if (hand0.side == Side.RIGHT && hand1.side == Side.LEFT) {
-            hand1 to hand0
-        } else {
-            if (hand0.landmarks[0].x <= hand1.landmarks[0].x) hand0 to hand1 else hand1 to hand0
-        }
+        // Identify Left Hand vs Right Hand strictly by screen X to eliminate mirror-reversal flicker
+        val (handL, handR) = if (hand0.landmarks[0].x <= hand1.landmarks[0].x) hand0 to hand1 else hand1 to hand0
 
         val wristL = handL.landmarks[0]
         val wristR = handR.landmarks[0]
@@ -272,6 +274,88 @@ class WheelGestureInterpreter(
                d2w(middleTip) < d2w(middleMcp) + 0.05f * palmDist &&
                d2w(ringTip) < d2w(ringMcp) + 0.05f * palmDist &&
                d2w(pinkyTip) < d2w(pinkyMcp) + 0.05f * palmDist
+    }
+
+    private fun processSingleHand(
+        hand: Hand,
+        tsNanos: Long,
+        profile: GameProfile,
+        cal: Calibration
+    ): List<GestureEvent> {
+        val wrist = hand.landmarks[0]
+        val knuckle = hand.landmarks[9] // Middle MCP
+        val tip = hand.landmarks[12]   // Middle tip
+
+        val events = mutableListOf<GestureEvent>()
+
+        // 1. Check Pinch Gesture
+        if (isPinching(hand)) {
+            if (tsNanos - lastPinchTsNanos > 750_000_000L) {
+                lastPinchTsNanos = tsNanos
+                if (ZorbiGestureConfig.pinchAction == ZorbiGestureConfig.PinchAction.PAUSE) {
+                    events.add(PauseToggle(tsNanos = tsNanos))
+                } else {
+                    events.add(Swipe(tsNanos = tsNanos, dir = Dir.RIGHT, speed = 77.0f))
+                }
+            }
+        }
+
+        // 2. Check Fist Gesture
+        if (isClosedFist(hand)) {
+            if (fistHoldStartNanos == 0L) {
+                fistHoldStartNanos = tsNanos
+            } else if (tsNanos - fistHoldStartNanos >= 700_000_000L) {
+                if (tsNanos - lastFistActionNanos >= 1_200_000_000L) {
+                    lastFistActionNanos = tsNanos
+                    if (ZorbiGestureConfig.fistAction == ZorbiGestureConfig.FistAction.PAUSE) {
+                        events.add(PauseToggle(tsNanos = tsNanos))
+                    } else {
+                        events.add(Swipe(tsNanos = tsNanos, dir = Dir.LEFT, speed = 88.0f))
+                    }
+                }
+            }
+        } else {
+            fistHoldStartNanos = 0L
+        }
+
+        // 3. Compute Hand Tilt Angle (dx, -dy) from wrist to knuckle
+        val dx = knuckle.x - wrist.x
+        val dy = knuckle.y - wrist.y
+        val rawTiltRad = atan2(dx.toDouble(), -dy.toDouble())
+        val rawTiltDeg = Math.toDegrees(rawTiltRad).toFloat()
+        val calibratedAngle = rawTiltDeg - cal.neutralAngleDeg
+
+        val deadzone = abs(profile.params.deadzoneDeg)
+        val maxAngle = if (cal.maxAngleDeg > 0f) cal.maxAngleDeg else 30.0f
+
+        val steerRatio = if (abs(calibratedAngle) <= deadzone) {
+            0.0f
+        } else {
+            (calibratedAngle / maxAngle).coerceIn(-1.0f, 1.0f)
+        }
+
+        // Forward reach (Hand depth / size) for Gas / Brake
+        val handSpan = sqrt((tip.x - wrist.x) * (tip.x - wrist.x) + (tip.y - wrist.y) * (tip.y - wrist.y))
+        val isGasForward = (wrist.z < -0.06f || handSpan > 0.35f)
+        val isBrakeBack = (wrist.z > 0.08f || handSpan < 0.16f)
+
+        val steerValue = when {
+            isGasForward -> 1.0f
+            isBrakeBack -> -1.0f
+            else -> steerRatio
+        }
+
+        wasTracking = true
+        lastEmittedValue = steerValue
+
+        events.add(
+            Steer(
+                tsNanos = tsNanos,
+                value = steerValue,
+                angleDeg = calibratedAngle
+            )
+        )
+        return events
     }
 
     private fun handleTrackingLoss(tsNanos: Long): List<GestureEvent> {

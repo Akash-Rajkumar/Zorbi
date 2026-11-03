@@ -26,15 +26,19 @@ class RealInputInjector(
 
     companion object {
         private const val TAG = "RealInputInjector"
-        const val DEFAULT_TAP_DURATION_MS = 50L
-        const val DEFAULT_HOLD_INTERVAL_MS = 100L
-        const val MIN_GESTURE_DURATION_MS = 20L
+        const val DEFAULT_TAP_DURATION_MS = 35L
+        const val DEFAULT_HOLD_INTERVAL_MS = 30L
+        const val MIN_GESTURE_DURATION_MS = 15L
     }
 
     override val isReady: StateFlow<Boolean> = ZorbiAccessibilityService.isConnected
 
     private var activeStroke: GestureDescription.StrokeDescription? = null
     private var lastPt: Pt? = null
+    @Volatile private var isGestureInProgress = false
+    @Volatile private var isHolding = false
+    @Volatile private var pendingPt: Pt? = null
+    @Volatile private var pendingIsDrag = false
 
     /**
      * Resolves the current screen dimensions dynamically based on active display configuration.
@@ -158,61 +162,122 @@ class RealInputInjector(
     }
 
     override fun holdAt(p: Pt) {
-        val service = serviceProvider()
-        if (service == null) return
+        val service = serviceProvider() ?: return
+        isHolding = true
         val (x, y) = mapToPixels(p)
-        try {
-            val path = Path().apply { moveTo(x, y) }
-            val stroke = if (activeStroke != null) {
-                activeStroke?.continueStroke(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
-            } else {
-                GestureDescription.StrokeDescription(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
-            }
-            if (stroke != null) {
-                activeStroke = stroke
-                lastPt = Pt(x, y)
-                val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                service.dispatchGesture(gesture, null, null)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to dispatch holdAt gesture at ($x, $y)", e)
-            activeStroke = null
+        val target = Pt(x, y)
+
+        if (isGestureInProgress) {
+            // Coalesce: save freshest target; do NOT flood Android's gesture queue
+            pendingPt = target
+            pendingIsDrag = false
+            return
         }
+
+        dispatchHoldOrDrag(service, target, isDrag = false)
     }
 
     override fun dragTo(p: Pt) {
-        val service = serviceProvider()
-        if (service == null) return
+        val service = serviceProvider() ?: return
+        isHolding = true
         val (newX, newY) = mapToPixels(p)
-        val fromX = lastPt?.x ?: newX
-        val fromY = lastPt?.y ?: newY
+        val target = Pt(newX, newY)
+
+        if (isGestureInProgress) {
+            // Coalesce: save freshest target; do NOT flood Android's gesture queue
+            pendingPt = target
+            pendingIsDrag = true
+            return
+        }
+
+        dispatchHoldOrDrag(service, target, isDrag = true)
+    }
+
+    private fun dispatchHoldOrDrag(service: AccessibilityService, target: Pt, isDrag: Boolean) {
         try {
+            val fromX = lastPt?.x ?: target.x
+            val fromY = lastPt?.y ?: target.y
             val path = Path().apply {
                 moveTo(fromX, fromY)
-                lineTo(newX, newY)
+                if (isDrag || fromX != target.x || fromY != target.y) {
+                    lineTo(target.x, target.y)
+                } else {
+                    // Infinitesimal micro-step to ensure non-empty path across OEM frameworks
+                    lineTo(target.x, target.y + 0.05f)
+                }
             }
+
             val stroke = if (activeStroke != null) {
-                activeStroke?.continueStroke(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
+                try {
+                    activeStroke?.continueStroke(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
+                } catch (e: Exception) {
+                    GestureDescription.StrokeDescription(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
+                }
             } else {
                 GestureDescription.StrokeDescription(path, 0L, DEFAULT_HOLD_INTERVAL_MS, true)
             }
+
             if (stroke != null) {
                 activeStroke = stroke
-                lastPt = Pt(newX, newY)
+                lastPt = target
+                isGestureInProgress = true
+
                 val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                service.dispatchGesture(gesture, null, null)
+                val callback = object : AccessibilityService.GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        onGestureFinished(service, success = true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        onGestureFinished(service, success = false)
+                    }
+                }
+                val dispatched = service.dispatchGesture(gesture, callback, null)
+                if (!dispatched) {
+                    isGestureInProgress = false
+                    activeStroke = null
+                }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to dispatch dragTo gesture to ($newX, $newY)", e)
+            Log.e(TAG, "Failed to dispatch gesture to (${target.x}, ${target.y})", e)
             activeStroke = null
+            isGestureInProgress = false
+        }
+    }
+
+    private fun onGestureFinished(service: AccessibilityService, success: Boolean) {
+        isGestureInProgress = false
+        if (!success) {
+            activeStroke = null
+        }
+        if (!isHolding) {
+            performFinalRelease(service)
+            return
+        }
+        val nextPt = pendingPt
+        if (nextPt != null) {
+            pendingPt = null
+            val isDrag = pendingIsDrag
+            dispatchHoldOrDrag(service, nextPt, isDrag)
         }
     }
 
     override fun release() {
+        isHolding = false
+        pendingPt = null
         val service = serviceProvider()
-        if (service != null && activeStroke != null && lastPt != null) {
+        if (service != null && !isGestureInProgress) {
+            performFinalRelease(service)
+        }
+    }
+
+    private fun performFinalRelease(service: AccessibilityService) {
+        if (activeStroke != null && lastPt != null) {
             try {
-                val endPath = Path().apply { moveTo(lastPt!!.x, lastPt!!.y) }
+                val endPath = Path().apply {
+                    moveTo(lastPt!!.x, lastPt!!.y)
+                    lineTo(lastPt!!.x, lastPt!!.y + 0.05f)
+                }
                 val finishStroke = activeStroke?.continueStroke(endPath, 0L, MIN_GESTURE_DURATION_MS, false)
                 if (finishStroke != null) {
                     val gesture = GestureDescription.Builder().addStroke(finishStroke).build()
@@ -224,5 +289,6 @@ class RealInputInjector(
         }
         activeStroke = null
         lastPt = null
+        isGestureInProgress = false
     }
 }
