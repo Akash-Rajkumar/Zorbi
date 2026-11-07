@@ -28,6 +28,7 @@ object ZorbiVoiceCoach {
                         tts?.language = Locale.US
                         isInitialized = true
                         Log.i(TAG, "TextToSpeech Voice Coach successfully initialized")
+                        Log.i("ZORBI_STARTUP", "Voice coach initialized successfully (TTS ready)")
                         // Flush any queued messages
                         synchronized(pendingMessages) {
                             for (msg in pendingMessages) {

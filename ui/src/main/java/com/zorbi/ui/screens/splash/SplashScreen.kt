@@ -1,5 +1,6 @@
 package com.zorbi.ui.screens.splash
 
+import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -70,9 +71,10 @@ fun SplashScreen(
 ) {
     var hasTransitioned by remember { mutableStateOf(false) }
 
-    fun triggerTransition() {
+    fun triggerTransition(reason: String = "timer") {
         if (!hasTransitioned) {
             hasTransitioned = true
+            Log.i("ZORBI_STARTUP", "Splash transition triggered [reason=$reason] -> onTransitionToNext()")
             onTransitionToNext()
         }
     }
@@ -85,7 +87,6 @@ fun SplashScreen(
     val taglineAlpha = remember { Animatable(0f) }
     val spinnerAlpha = remember { Animatable(0f) }
     val exitScale = remember { Animatable(1f) }
-    val exitAlpha = remember { Animatable(1f) }
 
     // Infinite breathing, floating & spinner loops
     val infiniteTransition = rememberInfiniteTransition(label = "splashInfinite")
@@ -132,44 +133,60 @@ fun SplashScreen(
 
     // Sequence orchestrator
     LaunchedEffect(Unit) {
-        // Stage 1: Robot mascot scales in with spring bounce
-        launch {
-            mascotAlpha.animateTo(1f, tween(450))
+        Log.i("ZORBI_STARTUP", "SplashScreen composed & entrance animations started")
+        try {
+            // Stage 1: Robot mascot scales in with spring bounce
+            launch {
+                mascotAlpha.animateTo(1f, tween(450))
+            }
+            launch {
+                mascotScale.animateTo(1.08f, tween(480, easing = FastOutSlowInEasing))
+                mascotScale.animateTo(1.0f, tween(220, easing = FastOutSlowInEasing))
+            }
+
+            delay(320L)
+
+            // Stage 2: ZORBI logo typography slides up
+            launch {
+                textAlpha.animateTo(1f, tween(420))
+            }
+            launch {
+                textOffsetY.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
+            }
+
+            delay(220L)
+
+            // Stage 3: Tagline reveals
+            taglineAlpha.animateTo(1f, tween(380))
+
+            // Stage 4: Spinner and status text reveal
+            spinnerAlpha.animateTo(1f, tween(300))
+
+            // Enjoy animated mascot float
+            val remainingMs = (splashDurationMs - 1400L).coerceAtLeast(600L)
+            delay(remainingMs)
+
+            // Stage 5: Exit expansion pop (NavHost handles crossfade natively; do not blank out to alpha=0f)
+            launch {
+                exitScale.animateTo(1.04f, tween(240, easing = FastOutSlowInEasing))
+            }
+            delay(200L)
+
+            Log.i("ZORBI_STARTUP", "SplashScreen animation sequence completed normally")
+            triggerTransition("normal_completion")
+        } catch (e: Exception) {
+            Log.e("ZORBI_STARTUP", "SplashScreen animation sequence encountered exception", e)
+            triggerTransition("exception_fallback")
         }
-        launch {
-            mascotScale.animateTo(1.08f, tween(480, easing = FastOutSlowInEasing))
-            mascotScale.animateTo(1.0f, tween(220, easing = FastOutSlowInEasing))
+    }
+
+    // Safety watchdog: Guarantees transition fires even if animation coroutine hangs or is delayed
+    LaunchedEffect(Unit) {
+        delay(splashDurationMs + 800L)
+        if (!hasTransitioned) {
+            Log.w("ZORBI_STARTUP", "SplashScreen watchdog timer fired; forcing transition to next screen")
+            triggerTransition("watchdog_timeout")
         }
-
-        delay(320L)
-
-        // Stage 2: ZORBI logo typography slides up
-        launch {
-            textAlpha.animateTo(1f, tween(420))
-        }
-        launch {
-            textOffsetY.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
-        }
-
-        delay(220L)
-
-        // Stage 3: Tagline reveals
-        taglineAlpha.animateTo(1f, tween(380))
-
-        // Stage 4: Spinner and status text reveal
-        spinnerAlpha.animateTo(1f, tween(300))
-
-        // Enjoy animated mascot float
-        val remainingMs = (splashDurationMs - 1400L).coerceAtLeast(800L)
-        delay(remainingMs)
-
-        // Stage 5: Exit animation with expansion & crossfade
-        launch {
-            exitScale.animateTo(1.06f, tween(260, easing = FastOutSlowInEasing))
-        }
-        exitAlpha.animateTo(0f, tween(240))
-
-        triggerTransition()
     }
 
     Box(
@@ -179,10 +196,12 @@ fun SplashScreen(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = { triggerTransition() }
+                onClick = {
+                    Log.i("ZORBI_STARTUP", "SplashScreen click-to-skip tapped by user")
+                    triggerTransition("click_to_skip")
+                }
             )
             .scale(exitScale.value)
-            .alpha(exitAlpha.value)
     ) {
         // Futuristic Cyber Background with Neon Arcs & Ambient Nebula Orbs
         SplashCyberBackground(auraPulse = auraPulse)

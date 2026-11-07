@@ -1,5 +1,6 @@
 package com.zorbi.ui.navigation
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -125,10 +126,34 @@ fun ZorbiNavHost(
         ) {
             SplashScreen(
                 onTransitionToNext = {
-                    val isWizardDone = settingsStorage?.load()?.wizardDone ?: false
-                    val targetDestination = if (isWizardDone) NavRoutes.HOME else NavRoutes.WIZARD
-                    navController.navigate(targetDestination) {
-                        popUpTo(NavRoutes.SPLASH) { inclusive = true }
+                    try {
+                        val isWizardDone = try {
+                            val settings = settingsStorage?.load()
+                            val done = settings?.wizardDone ?: false
+                            Log.i("ZORBI_STARTUP", "Settings loaded successfully: wizardDone=$done, perfMode=${settings?.perfMode}")
+                            done
+                        } catch (e: Throwable) {
+                            Log.e("ZORBI_STARTUP", "Failed to load SettingsStorage; defaulting wizardDone=false", e)
+                            false
+                        }
+
+                        val targetDestination = if (isWizardDone) NavRoutes.HOME else NavRoutes.WIZARD
+                        Log.i("ZORBI_STARTUP", "Splash transitioning to targetDestination: $targetDestination")
+
+                        val currentRoute = navController.currentBackStackEntry?.destination?.route
+                        if (currentRoute == NavRoutes.SPLASH) {
+                            navController.navigate(targetDestination) {
+                                popUpTo(NavRoutes.SPLASH) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        } else {
+                            Log.w("ZORBI_STARTUP", "NavHost current route is '$currentRoute' (not SPLASH); navigating directly to $targetDestination")
+                            navController.navigate(targetDestination) {
+                                launchSingleTop = true
+                            }
+                        }
+                    } catch (navEx: Throwable) {
+                        Log.e("ZORBI_STARTUP", "Navigation from SPLASH failed with exception", navEx)
                     }
                 }
             )

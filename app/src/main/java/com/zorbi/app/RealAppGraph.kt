@@ -53,9 +53,10 @@ class RealAppGraph(
 
     companion object {
         private const val TAG = "RealAppGraph"
+        private const val TAG_STARTUP = "ZORBI_STARTUP"
 
         fun createDefault(context: Context): RealAppGraph {
-            Log.i(TAG, "Initializing RealAppGraph with real Vision, Input, Engine, and Calibration backends")
+            Log.i(TAG_STARTUP, "RealAppGraph.createDefault: wiring live components (Injector, Repositories, Engine, Telemetry)")
             val realInjector = RealInputInjector()
             val profileRepo = RealProfileRepository(context)
             val calibRepo = RealCalibrationRepository(context)
@@ -74,6 +75,7 @@ class RealAppGraph(
                 context = context
             )
 
+            Log.i(TAG_STARTUP, "RealAppGraph.createDefault: all backend components successfully constructed")
             return RealAppGraph(
                 trackers = trackerRegistry,
                 engine = realEngine,

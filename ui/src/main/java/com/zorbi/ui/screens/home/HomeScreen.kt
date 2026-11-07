@@ -217,6 +217,7 @@ fun HomeScreen(
 
     // Load available profiles from repository and initialize defaults if empty
     LaunchedEffect(Unit) {
+        android.util.Log.i("ZORBI_STARTUP", "HomeScreen composed successfully")
         isLoadingProfile = true
         try {
             var profiles = appGraph.profiles.list()

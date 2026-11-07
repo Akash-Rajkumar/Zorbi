@@ -117,6 +117,10 @@ fun WizardScreen(
         wizardState = WizardSystemHelper.checkStatus(context, isInjectorReady)
     }
 
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        android.util.Log.i("ZORBI_STARTUP", "WizardScreen composed successfully")
+    }
+
     // Lifecycle observer to re-check on resume when returning from Android Settings
     DisposableEffect(lifecycleOwner, isInjectorReady) {
         val observer = LifecycleEventObserver { _, event ->
