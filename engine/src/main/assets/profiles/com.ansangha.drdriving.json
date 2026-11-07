@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.ansangha.drdriving",
+  "displayName": "Dr. Driving",
+  "orientation": "LANDSCAPE",
+  "tracker": "HAND_DUAL_WHEEL",
+  "mapping": "STEER_BUTTONS",
+  "targets": {
+    "left": { "x": 0.76, "y": 0.82 },
+    "right": { "x": 0.90, "y": 0.80 },
+    "gear_up": { "x": 0.92, "y": 0.32 },
+    "gear_down": { "x": 0.92, "y": 0.44 },
+    "center": { "x": 0.20, "y": 0.70 }
+  },
+  "params": {
+    "deadzoneDeg": 6.0,
+    "cooldownMs": 180,
+    "swipeMinSpeed": 0.30,
+    "slashMinLength": 0.15,
+    "smoothing": {
+      "minCutoff": 1.0,
+      "beta": 0.01
+    }
+  }
+}

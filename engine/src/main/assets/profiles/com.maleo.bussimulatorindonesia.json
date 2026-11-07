@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.maleo.bussimulatorindonesia",
+  "displayName": "Bus Simulator Indonesia",
+  "orientation": "LANDSCAPE",
+  "tracker": "HAND_DUAL_WHEEL",
+  "mapping": "STEER_BUTTONS",
+  "targets": {
+    "steer_wheel": { "x": 0.125, "y": 0.785 },
+    "left": { "x": 0.04, "y": 0.72 },
+    "right": { "x": 0.168, "y": 0.72 },
+    "horn": { "x": 0.10, "y": 0.72 },
+    "brake": { "x": 0.85, "y": 0.88 },
+    "gas": { "x": 0.95, "y": 0.88 },
+    "gear_up": { "x": 0.91, "y": 0.70 },
+    "gear_down": { "x": 0.95, "y": 0.70 },
+    "headlight": { "x": 0.027, "y": 0.38 },
+    "hazard": { "x": 0.076, "y": 0.38 },
+    "wiper": { "x": 0.908, "y": 0.38 },
+    "center": { "x": 0.125, "y": 0.785 }
+  },
+  "params": {
+    "deadzoneDeg": 6.0,
+    "cooldownMs": 180,
+    "swipeMinSpeed": 0.28,
+    "slashMinLength": 0.15,
+    "smoothing": {
+      "minCutoff": 1.0,
+      "beta": 0.01
+    }
+  }
+}

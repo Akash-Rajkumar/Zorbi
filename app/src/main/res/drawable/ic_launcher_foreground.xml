@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Ambient Radar Targeting Ring -->
+    <path
+        android:strokeWidth="1.2"
+        android:strokeColor="#1E2A4A"
+        android:fillColor="#00000000"
+        android:pathData="M 54, 24 A 30,30 0 1,0 54.001, 24" />
+
+    <!-- Targeting Reticle Ticks (Camera Motion Focus) -->
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M 53,20 L 55,20 L 55,26 L 53,26 Z
+                          M 53,82 L 55,82 L 55,88 L 53,88 Z
+                          M 20,53 L 26,53 L 26,55 L 20,55 Z
+                          M 82,53 L 88,53 L 88,55 L 82,55 Z" />
+
+    <!-- Touchless Motion Flank Accents (Violet Wings) -->
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M 27,45 L 33,54 L 27,63 L 24,63 L 29,54 L 24,45 Z
+                          M 81,45 L 84,45 L 79,54 L 84,63 L 81,63 L 75,54 Z" />
+
+    <!-- Geometric ZORBI Monogram: Top Wing / Crest -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 33,34 L 75,34 L 71,43 L 43,43 L 38,43 Z" />
+
+    <!-- Geometric ZORBI Monogram: Dynamic Diagonal Motion Slash -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 72,37 L 76,34 L 43,74 L 33,74 L 64,43 Z" />
+
+    <!-- Geometric ZORBI Monogram: Bottom Anchor -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 33,74 L 75,74 L 69,65 L 40,65 Z" />
+
+    <!-- Camera Vision Focus Node (Center Sensor) -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 54,51 A 3,3 0 1,0 54.001,51 Z" />
+
+    <path
+        android:fillColor="#7C4DFF"
+        android:pathData="M 54,52.5 A 1.5,1.5 0 1,0 54.001,52.5 Z" />
+
+</vector>
